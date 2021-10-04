@@ -1,3 +1,13 @@
+import clone from 'clone';
+import fs from 'fs';
+import { cookiesFromJar, jarFromCookies } from 'insomnia-cookies';
+import {
+  buildQueryStringFromParams,
+  joinUrlAndQueryString,
+  setDefaultProtocol,
+  smartEncodeUrl,
+} from 'insomnia-url';
+import mkdirp from 'mkdirp';
 import {
   Curl,
   CurlAuth,
@@ -7,27 +17,10 @@ import {
   CurlInfoDebug,
   CurlNetrc,
 } from 'node-libcurl';
-
-import { Workspace } from '../models/workspace';
-import { cookiesFromJar, jarFromCookies } from 'insomnia-cookies';
-import {
-  buildQueryStringFromParams,
-  joinUrlAndQueryString,
-  setDefaultProtocol,
-  smartEncodeUrl,
-} from 'insomnia-url';
+import { join as pathJoin } from 'path';
 import { parse as urlParse, resolve as urlResolve } from 'url';
 import * as uuid from 'uuid';
-import clone from 'clone';
-import mkdirp from 'mkdirp';
-import { join as pathJoin } from 'path';
-import fs from 'fs';
 
-
-import { getAuthHeader } from './authentication';
-import caCerts from './ca-certs';
-import { buildMultipart } from './multipart';
-import { urlMatchesCertHost } from './url-matches-cert-host';
 import {
   AUTH_AWS_IAM,
   AUTH_DIGEST,
@@ -38,6 +31,7 @@ import {
   getAppVersion,
   HttpVersions,
 } from '../common/constants';
+import { getDataDirectory, getTempDir } from '../common/electron-helpers';
 import {
   describeByteSize,
   getContentTypeHeader,
@@ -50,33 +44,25 @@ import {
   hasUserAgentHeader,
   waitForStreamToFinish,
 } from '../common/misc';
-import { getDataDirectory, getTempDir } from '../common/electron-helpers';
-import { ResponsePatch, storeTimeline, _applyResponsePluginHooks, _getAwsAuthHeaders, _parseHeaders } from './network';
-import type { Environment } from '../models/environment';
 import { RenderedRequest } from '../common/render';
-import { ResponseTimelineEntry } from '../models/response';
 import * as models from '../models';
+import type { Environment } from '../models/environment';
+import { ResponseTimelineEntry } from '../models/response';
 import type { Settings } from '../models/settings';
+import { Workspace } from '../models/workspace';
+import { getAuthHeader } from './authentication';
+import caCerts from './ca-certs';
+import { buildMultipart } from './multipart';
+import { _applyResponsePluginHooks, _getAwsAuthHeaders, _parseHeaders, ResponsePatch, storeTimeline } from './network';
+import { urlMatchesCertHost } from './url-matches-cert-host';
 
 // Special header value that will prevent the header being sent
 const DISABLE_HEADER_VALUE = '__Di$aB13d__';
 
-// Because node-libcurl changed some names that we used in the timeline
-const LIBCURL_DEBUG_MIGRATION_MAP = {
-  HeaderIn: 'HEADER_IN',
-  DataIn: 'DATA_IN',
-  SslDataIn: 'SSL_DATA_IN',
-  HeaderOut: 'HEADER_OUT',
-  DataOut: 'DATA_OUT',
-  SslDataOut: 'SSL_DATA_OUT',
-  Text: 'TEXT',
-  '': '',
-};
+// Phases of a curl request
+// create curl instance, set options, assign event callbacks end and error, perform
 
-//Phases of a curl request
-//create curl instance, set options, assign event callbacks end and error, perform
-
-//maxims
+// maxims
 // this should happen on the main thread?
 // this shouldn't know about the renderer?
 
@@ -101,6 +87,52 @@ export async function cancelRequestById(requestId) {
   console.log(`[network] Failed to cancel req=${requestId} because cancel function not found`);
 }
 
+const debugHandler = (infoType, contentBuffer, settings, addTimeline) => {
+  const content = contentBuffer.toString('utf8');
+  const rawName = Object.keys(CurlInfoDebug).find(k => CurlInfoDebug[k] === infoType) || '';
+  // Because node-libcurl changed some names that we used in the timeline
+  const LIBCURL_DEBUG_MIGRATION_MAP = {
+    HeaderIn: 'HEADER_IN',
+    DataIn: 'DATA_IN',
+    SslDataIn: 'SSL_DATA_IN',
+    HeaderOut: 'HEADER_OUT',
+    DataOut: 'DATA_OUT',
+    SslDataOut: 'SSL_DATA_OUT',
+    Text: 'TEXT',
+    '': '',
+  };
+  const name = LIBCURL_DEBUG_MIGRATION_MAP[rawName] || rawName;
+
+  if (infoType === CurlInfoDebug.SslDataIn || infoType === CurlInfoDebug.SslDataOut) {
+    return 0;
+  }
+
+  // Ignore the possibly large data messages
+  if (infoType === CurlInfoDebug.DataOut) {
+    if (contentBuffer.length === 0) {
+      // Sometimes this happens, but I'm not sure why. Just ignore it.
+    } else if (contentBuffer.length / 1024 < settings.maxTimelineDataSizeKB) {
+      addTimeline(name, content);
+    } else {
+      addTimeline(name, `(${describeByteSize(contentBuffer.length)} hidden)`);
+    }
+
+    return 0;
+  }
+
+  if (infoType === CurlInfoDebug.DataIn) {
+    addTimeline('TEXT', `Received ${describeByteSize(contentBuffer.length)} chunk`);
+    return 0;
+  }
+
+  // Don't show cookie setting because this will display every domain in the jar
+  if (infoType === CurlInfoDebug.Text && content.indexOf('Added cookie') === 0) {
+    return 0;
+  }
+
+  addTimeline(name, content);
+  return 0; // Must be here
+};
 
 export async function _actuallySend(
   renderedRequest: RenderedRequest,
@@ -114,11 +146,7 @@ export async function _actuallySend(
     const timeline: ResponseTimelineEntry[] = [];
 
     function addTimeline(name, value) {
-      timeline.push({
-        name,
-        value,
-        timestamp: Date.now(),
-      });
+      timeline.push({ name, value, timestamp: Date.now() });
     }
 
     function addTimelineText(value) {
@@ -191,9 +219,9 @@ export async function _actuallySend(
         true,
       );
     }
-// TODO(JK): replace this with the type check CurlOption
+    // TODO(JK): replace this with the type check CurlOption
     /** Helper function to set Curl options */
-    const setOpt: typeof curl.setOpt = (opt: any, val: any) => {
+    const setOpt = (opt: any, val: any) => {
       try {
         return curl.setOpt(opt, val);
       } catch (err) {
@@ -201,7 +229,12 @@ export async function _actuallySend(
         throw new Error(`${err.message} (${opt} ${name || 'n/a'})`);
       }
     };
-// TODO(JK): revisit the intention behind request cancellation
+    const setOptAndLog = (opt, val, log) => {
+      setOpt(opt, val);
+      addTimelineText(log);
+    };
+
+    // TODO(JK): revisit the intention behind request cancellation
     try {
       // Setup the cancellation logic
       cancelRequestFunctionMap[renderedRequest._id] = async () => {
@@ -224,97 +257,37 @@ export async function _actuallySend(
 
       // Set all the basic options
       setOpt(Curl.option.VERBOSE, true);
-
       // True so debug function works\
       setOpt(Curl.option.NOPROGRESS, true);
-
       // True so curl doesn't print progress
       setOpt(Curl.option.ACCEPT_ENCODING, '');
-
       // Auto decode everything
       curl.enable(CurlFeature.Raw);
-
       // Set follow redirects setting
-      switch (renderedRequest.settingFollowRedirects) {
-        case 'off':
-          setOpt(Curl.option.FOLLOWLOCATION, false);
-          break;
-
-        case 'on':
-          setOpt(Curl.option.FOLLOWLOCATION, true);
-          break;
-
-        default:
-          // Set to global setting
-          setOpt(Curl.option.FOLLOWLOCATION, settings.followRedirects);
-          break;
-      }
-
+      const shouldFollowRedirects = renderedRequest.settingFollowRedirects === 'on' || settings.followRedirects;
+      setOpt(Curl.option.FOLLOWLOCATION, shouldFollowRedirects);
       // Set maximum amount of redirects allowed
       // NOTE: Setting this to -1 breaks some versions of libcurl
       if (settings.maxRedirects > 0) {
         setOpt(Curl.option.MAXREDIRS, settings.maxRedirects);
       }
-
       // Don't rebuild dot sequences in path
       if (!renderedRequest.settingRebuildPath) {
         setOpt(Curl.option.PATH_AS_IS, true);
       }
-
       // Only set CURLOPT_CUSTOMREQUEST if not HEAD or GET. This is because Curl
       // See https://curl.haxx.se/libcurl/c/CURLOPT_CUSTOMREQUEST.html
-      switch (renderedRequest.method.toUpperCase()) {
-        case 'HEAD':
-          // This is how you tell Curl to send a HEAD request
-          setOpt(Curl.option.NOBODY, 1);
-          break;
-
-        case 'POST':
-          // This is how you tell Curl to send a POST request
-          setOpt(Curl.option.POST, 1);
-          break;
-
-        default:
-          // IMPORTANT: Only use CUSTOMREQUEST for all but HEAD and POST
-          setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
-          break;
-      }
-
+      if (renderedRequest.method.toUpperCase() === 'HEAD') {
+        setOpt(Curl.option.NOBODY, 1);
+      } else if (renderedRequest.method.toUpperCase() === 'POST') {
+        setOpt(Curl.option.POST, 1);
+        // IMPORTANT: Only use CUSTOMREQUEST for all but HEAD and POST
+      } else setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
+      // TODO(JK): this is fucking wierd
       // Setup debug handler
-      setOpt(Curl.option.DEBUGFUNCTION, (infoType, contentBuffer) => {
-        const content = contentBuffer.toString('utf8');
-        const rawName = Object.keys(CurlInfoDebug).find(k => CurlInfoDebug[k] === infoType) || '';
-        const name = LIBCURL_DEBUG_MIGRATION_MAP[rawName] || rawName;
-
-        if (infoType === CurlInfoDebug.SslDataIn || infoType === CurlInfoDebug.SslDataOut) {
-          return 0;
-        }
-
-        // Ignore the possibly large data messages
-        if (infoType === CurlInfoDebug.DataOut) {
-          if (contentBuffer.length === 0) {
-            // Sometimes this happens, but I'm not sure why. Just ignore it.
-          } else if (contentBuffer.length / 1024 < settings.maxTimelineDataSizeKB) {
-            addTimeline(name, content);
-          } else {
-            addTimeline(name, `(${describeByteSize(contentBuffer.length)} hidden)`);
-          }
-
-          return 0;
-        }
-
-        if (infoType === CurlInfoDebug.DataIn) {
-          addTimelineText(`Received ${describeByteSize(contentBuffer.length)} chunk`);
-          return 0;
-        }
-
-        // Don't show cookie setting because this will display every domain in the jar
-        if (infoType === CurlInfoDebug.Text && content.indexOf('Added cookie') === 0) {
-          return 0;
-        }
-
-        addTimeline(name, content);
-        return 0; // Must be here
+      addTimelineText('TEST1234567892345678q2345678234567');
+      setOpt(Curl.option.DEBUGFUNCTION, (type, data) => {
+        debugHandler(type, data, settings, addTimeline);
       });
       // Set the headers (to be modified as we go)
       const headers = clone(renderedRequest.headers);
@@ -343,8 +316,7 @@ export async function _actuallySend(
       // Set HTTP version
       switch (settings.preferredHttpVersion) {
         case HttpVersions.V1_0:
-          addTimelineText('Using HTTP 1.0');
-          setOpt(Curl.option.HTTP_VERSION, CurlHttpVersion.V1_0);
+          setOptAndLog(Curl.option.HTTP_VERSION, CurlHttpVersion.V1_0, 'Using HTTP 1.0');
           break;
 
         case HttpVersions.V1_1:
@@ -401,6 +373,7 @@ export async function _actuallySend(
       const fullCAPath = pathJoin(baseCAPath, 'ca-certs.pem');
 
       try {
+        // does file exist
         fs.statSync(fullCAPath);
       } catch (err) {
         // Doesn't exist yet, so write it
@@ -447,8 +420,7 @@ export async function _actuallySend(
         }
 
         addTimelineText(
-          `Enable cookie sending with jar of ${cookies.length} cookie${
-            cookies.length !== 1 ? 's' : ''
+          `Enable cookie sending with jar of ${cookies.length} cookie${cookies.length !== 1 ? 's' : ''
           }`,
         );
       } else {
@@ -800,7 +772,7 @@ export async function _actuallySend(
         // Send response
         await respond(responsePatch, responseBodyPath);
       });
-      curl.on('error', async function(err, code) {
+      curl.on('error', async function (err, code) {
         let error = err + '';
         let statusMessage = 'Error';
 
