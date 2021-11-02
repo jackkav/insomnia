@@ -1,4 +1,4 @@
-import { generate, runTestsCli, TestSuite } from 'insomnia-testing';
+import { generate, runTestsCli } from 'insomnia-testing';
 
 import { loadDb } from '../db';
 import { loadEnvironment, promptEnvironment } from '../db/models/environment';
@@ -37,7 +37,7 @@ function validateOptions({ reporter }: Partial<RunTestsOptions>): boolean {
   return true;
 }
 
-const createTestSuite = (dbSuite: UnitTestSuite, dbTests: UnitTest[]): TestSuite => ({
+const createTestSuite = (dbSuite: UnitTestSuite, dbTests: UnitTest[]) => ({
   name: dbSuite.name,
   suites: [],
   tests: dbTests.map(({ name, code, requestId }) => ({

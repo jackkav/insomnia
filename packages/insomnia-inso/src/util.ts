@@ -10,7 +10,7 @@ export const logErrorExit1 = (err?: Error) => {
   process.exit(1);
 };
 
-export const exit = async (result: Promise<boolean>): Promise<void> => {
+export const exit = async (result: Promise<unknown>): Promise<void> => {
   return result.then(r => process.exit(r ? 0 : 1)).catch(logErrorExit1);
 };
 
