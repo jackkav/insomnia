@@ -88,7 +88,6 @@ export interface ResponsePatch {
   statusMessage?: string;
   timelinePath?: string;
   url?: string;
-  noPlugins?: boolean;
 }
 
 // Time since user's last keypress to wait before making the request
@@ -180,8 +179,7 @@ export async function _actuallySend(
     /** Helper function to respond with a success */
     async function respond(
       patch: ResponsePatch,
-      bodyPath: string | null,
-      noPlugins = false,
+      bodyPath: string | null
     ) {
       const timelinePath = await storeTimeline(timeline);
       // Tear Down the cancellation logic
@@ -197,7 +195,6 @@ export async function _actuallySend(
           bodyPath: bodyPath || '',
           settingSendCookies: renderedRequest.settingSendCookies,
           settingStoreCookies: renderedRequest.settingStoreCookies,
-          noPlugins,
         } as ResponsePatch,
         patch,
       ));
@@ -209,14 +206,13 @@ export async function _actuallySend(
         {
           url: renderedRequest.url,
           parentId: renderedRequest._id,
-          error: err.message,
+          error: err?.message || 'Something went wrong',
           elapsedTime: 0, // 0 because this path is hit during plugin calls
           statusMessage: 'Error',
           settingSendCookies: renderedRequest.settingSendCookies,
           settingStoreCookies: renderedRequest.settingStoreCookies,
         },
         null,
-        true,
       );
     }
 
@@ -244,7 +240,6 @@ export async function _actuallySend(
             error: 'Request was cancelled',
           },
           null,
-          true,
         );
         // Kill it!
         curl.close();
@@ -816,11 +811,10 @@ export async function _actuallySend(
         await respond(
           {
             statusMessage,
-            error,
+            error: error || 'Something went wrong',
             elapsedTime: curl.getInfo(Curl.info.TOTAL_TIME) as number * 1000,
           },
           null,
-          true,
         );
       });
       curl.perform();
@@ -880,7 +874,7 @@ export async function sendWithSettings(
     environment,
     settings.validateAuthSSL,
   );
-  if (response.noPlugins){
+  if (response.error){
     return response;
   }
   try {
@@ -987,7 +981,7 @@ export async function send(
       ? `[network] Response failed req=${requestId} err=${response.error || 'n/a'}`
       : `[network] Response succeeded req=${requestId} status=${response.statusCode || '?'}`,
   );
-  if (response.noPlugins){
+  if (response.error){
     return response;
   }
   try {
