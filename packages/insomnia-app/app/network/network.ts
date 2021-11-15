@@ -88,6 +88,7 @@ export interface ResponsePatch {
   statusMessage?: string;
   timelinePath?: string;
   url?: string;
+  noPlugins?: boolean;
 }
 
 // Time since user's last keypress to wait before making the request
@@ -153,7 +154,6 @@ export function hasCancelFunctionForId(requestId) {
 
 export async function _actuallySend(
   renderedRequest: RenderedRequest,
-  renderContext: Record<string, any>,
   workspace: Workspace,
   settings: Omit<Settings, 'validateSSL' | 'validateAuthSSL'>,
   environment?: Environment | null,
@@ -187,7 +187,7 @@ export async function _actuallySend(
       // Tear Down the cancellation logic
       clearCancelFunctionForId(renderedRequest._id);
       const environmentId = environment ? environment._id : null;
-      const responsePatchBeforeHooks = Object.assign(
+      return resolve(Object.assign(
         {
           timelinePath,
           environmentId,
@@ -197,31 +197,10 @@ export async function _actuallySend(
           bodyPath: bodyPath || '',
           settingSendCookies: renderedRequest.settingSendCookies,
           settingStoreCookies: renderedRequest.settingStoreCookies,
+          noPlugins,
         } as ResponsePatch,
         patch,
-      );
-
-      if (noPlugins) {
-        resolve(responsePatchBeforeHooks);
-        return;
-      }
-
-      let responsePatch: ResponsePatch | null = null;
-
-      try {
-        responsePatch = await _applyResponsePluginHooks(
-          responsePatchBeforeHooks,
-          renderedRequest,
-          renderContext,
-        );
-      } catch (err) {
-        await handleError(
-          new Error(`[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`),
-        );
-        return;
-      }
-
-      resolve(responsePatch);
+      ));
     }
 
     /** Helper function to respond with an error */
@@ -894,14 +873,33 @@ export async function sendWithSettings(
     throw new Error(`Failed to render request: ${requestId}`);
   }
 
-  return _actuallySend(
+  const response = await _actuallySend(
     renderResult.request,
-    renderResult.context,
     workspace,
     settings,
     environment,
     settings.validateAuthSSL,
   );
+  if (response.noPlugins){
+    return response;
+  }
+  try {
+    return _applyResponsePluginHooks(
+      response,
+      renderResult.request,
+      renderResult.context,
+    );
+  } catch (err) {
+    return {
+      url: renderResult.request.url,
+      parentId: renderResult.request._id,
+      error: `[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`,
+      elapsedTime: 0, // 0 because this path is hit during plugin calls
+      statusMessage: 'Error',
+      settingSendCookies: renderResult.request.settingSendCookies,
+      settingStoreCookies: renderResult.request.settingStoreCookies,
+    };
+  }
 }
 
 export async function send(
@@ -979,7 +977,6 @@ export async function send(
 
   const response = await _actuallySend(
     renderedRequest,
-    renderedContextBeforePlugins,
     workspace,
     settings,
     environment,
@@ -990,7 +987,26 @@ export async function send(
       ? `[network] Response failed req=${requestId} err=${response.error || 'n/a'}`
       : `[network] Response succeeded req=${requestId} status=${response.statusCode || '?'}`,
   );
-  return response;
+  if (response.noPlugins){
+    return response;
+  }
+  try {
+    return _applyResponsePluginHooks(
+      response,
+      renderedRequest,
+      renderedContextBeforePlugins,
+    );
+  } catch (err) {
+    return {
+      url: renderedRequest.url,
+      parentId: renderedRequest._id,
+      error: `[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`,
+      elapsedTime: 0, // 0 because this path is hit during plugin calls
+      statusMessage: 'Error',
+      settingSendCookies: renderedRequest.settingSendCookies,
+      settingStoreCookies: renderedRequest.settingStoreCookies,
+    };
+  }
 }
 
 async function _applyRequestPluginHooks(
