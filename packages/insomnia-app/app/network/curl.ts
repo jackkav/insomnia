@@ -1,5 +1,6 @@
 import clone from 'clone';
 import fs from 'fs';
+import { HttpVersions } from 'insomnia-common';
 import { cookiesFromJar, jarFromCookies } from 'insomnia-cookies';
 import {
   buildQueryStringFromParams,
@@ -29,7 +30,6 @@ import {
   CONTENT_TYPE_FORM_DATA,
   CONTENT_TYPE_FORM_URLENCODED,
   getAppVersion,
-  HttpVersions,
 } from '../common/constants';
 import { getDataDirectory, getTempDir } from '../common/electron-helpers';
 import {
@@ -157,11 +157,8 @@ export async function _actuallySend(
     const curl = new Curl();
 
     /** Helper function to respond with a success */
-    async function respond(
-      patch: ResponsePatch,
-      bodyPath: string | null,
-      noPlugins = false,
-    ) {
+
+    async function respondWithPlugins(patch, bodyPath){
       const timelinePath = await storeTimeline(timeline);
       // Tear Down the cancellation logic
       clearCancelFunctionForId(renderedRequest._id);
@@ -180,11 +177,6 @@ export async function _actuallySend(
         patch,
       );
 
-      if (noPlugins) {
-        resolve(responsePatchBeforeHooks);
-        return;
-      }
-
       let responsePatch: ResponsePatch | null = null;
 
       try {
@@ -202,10 +194,32 @@ export async function _actuallySend(
 
       resolve(responsePatch);
     }
+    async function respondWithoutPlugins(patch, bodyPath){
+      const timelinePath = await storeTimeline(timeline);
+      // Tear Down the cancellation logic
+      clearCancelFunctionForId(renderedRequest._id);
+      const environmentId = environment ? environment._id : null;
+      const responsePatchBeforeHooks = Object.assign(
+        {
+          timelinePath,
+          environmentId,
+          parentId: renderedRequest._id,
+          bodyCompression: null,
+          // Will default to .zip otherwise
+          bodyPath: bodyPath || '',
+          settingSendCookies: renderedRequest.settingSendCookies,
+          settingStoreCookies: renderedRequest.settingStoreCookies,
+          noPlugins: true,
+        } as ResponsePatch,
+        patch,
+      );
+
+      return resolve(responsePatchBeforeHooks);
+    }
 
     /** Helper function to respond with an error */
     async function handleError(err: Error) {
-      await respond(
+      await respondWithPlugins(
         {
           url: renderedRequest.url,
           parentId: renderedRequest._id,
@@ -215,8 +229,7 @@ export async function _actuallySend(
           settingSendCookies: renderedRequest.settingSendCookies,
           settingStoreCookies: renderedRequest.settingStoreCookies,
         },
-        null,
-        true,
+        null
       );
     }
     // TODO(JK): replace this with the type check CurlOption
@@ -238,7 +251,7 @@ export async function _actuallySend(
     try {
       // Setup the cancellation logic
       cancelRequestFunctionMap[renderedRequest._id] = async () => {
-        await respond(
+        await respondWithPlugins(
           {
             elapsedTime: (curl.getInfo(Curl.info.TOTAL_TIME) as number || 0) * 1000,
             // @ts-expect-error -- needs generic
@@ -248,8 +261,7 @@ export async function _actuallySend(
             statusMessage: 'Cancelled',
             error: 'Request was cancelled',
           },
-          null,
-          true,
+          null
         );
         // Kill it!
         curl.close();
@@ -770,9 +782,9 @@ export async function _actuallySend(
         // Make sure the response body has been fully written first
         await waitForStreamToFinish(responseBodyWriteStream);
         // Send response
-        await respond(responsePatch, responseBodyPath);
+        await respondWithoutPlugins(responsePatch, responseBodyPath);
       });
-      curl.on('error', async function (err, code) {
+      curl.on('error', async function(err, code) {
         let error = err + '';
         let statusMessage = 'Error';
 
@@ -781,14 +793,13 @@ export async function _actuallySend(
           statusMessage = 'Abort';
         }
 
-        await respond(
+        await respondWithPlugins(
           {
             statusMessage,
             error,
             elapsedTime: curl.getInfo(Curl.info.TOTAL_TIME) as number * 1000,
           },
           null,
-          true,
         );
       });
       curl.perform();

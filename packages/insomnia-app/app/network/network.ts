@@ -53,6 +53,7 @@ export interface ResponsePatch {
   statusMessage?: string;
   timelinePath?: string;
   url?: string;
+  noPlugins?: string;
 }
 
 // Time since user's last keypress to wait before making the request
@@ -104,7 +105,7 @@ export async function sendWithSettings(
     throw new Error(`Failed to render request: ${requestId}`);
   }
 
-  return _actuallySend(
+  const response = await _actuallySend(
     renderResult.request,
     renderResult.context,
     workspace,
@@ -112,6 +113,26 @@ export async function sendWithSettings(
     environment,
     settings.validateAuthSSL,
   );
+  if (response.noPlugins){
+    return response;
+  }
+  try {
+    return _applyResponsePluginHooks(
+      response,
+      renderResult.request,
+      renderResult.context,
+    );
+  } catch (err) {
+    return {
+      url: renderResult.request.url,
+      parentId: renderResult.request._id,
+      error: `[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`,
+      elapsedTime: 0, // 0 because this path is hit during plugin calls
+      statusMessage: 'Error',
+      settingSendCookies: renderResult.request.settingSendCookies,
+      settingStoreCookies: renderResult.request.settingStoreCookies,
+    };
+  }
 }
 
 export async function send(
@@ -200,7 +221,27 @@ export async function send(
       ? `[network] Response failed req=${requestId} err=${response.error || 'n/a'}`
       : `[network] Response succeeded req=${requestId} status=${response.statusCode || '?'}`,
   );
-  return response;
+  if (response.noPlugins){
+    return response;
+  }
+  try {
+    return _applyResponsePluginHooks(
+      response,
+      renderedRequest,
+      renderedContextBeforePlugins,
+    );
+  } catch (err) {
+    return {
+      url: renderedRequest.url,
+      parentId: renderedRequest._id,
+      error: `[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`,
+      elapsedTime: 0, // 0 because this path is hit during plugin calls
+      statusMessage: 'Error',
+      settingSendCookies: renderedRequest.settingSendCookies,
+      settingStoreCookies: renderedRequest.settingStoreCookies,
+    };
+  }
+
 }
 
 async function _applyRequestPluginHooks(
