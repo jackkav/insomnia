@@ -145,7 +145,7 @@ export async function send(
   requestId: string,
   environmentId?: string,
   extraInfo?: ExtraRenderInfo,
-) {
+): Promise<ResponsePatch> {
   console.log(`[network] Sending req=${requestId} env=${environmentId || 'null'}`);
   // HACK: wait for all debounces to finish
 
