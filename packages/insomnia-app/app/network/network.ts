@@ -18,6 +18,7 @@ import {
   RENDER_PURPOSE_NO_RENDER,
   RENDER_PURPOSE_SEND,
 } from '../common/render';
+import * as curl from '../main/curl';
 import * as models from '../models';
 import type { Environment } from '../models/environment';
 import type { Request, RequestHeader } from '../models/request';
@@ -111,8 +112,13 @@ export async function sendWithSettings(
   } catch (err) {
     throw new Error(`Failed to render request: ${requestId}`);
   }
-
-  const response = await ipcRenderer.invoke('_actuallySend',
+  const response =  ipcRenderer?.invoke ? await ipcRenderer.invoke('_actuallySend',
+    renderResult.request,
+    workspace._id,
+    settings,
+    environment?._id,
+    settings.validateAuthSSL,
+  ) : await curl._actuallySend(
     renderResult.request,
     workspace._id,
     settings,
@@ -214,7 +220,13 @@ export async function send(
     } as ResponsePatch;
   }
 
-  const response = await ipcRenderer.invoke('_actuallySend',
+  const response =  ipcRenderer?.invoke ? await ipcRenderer.invoke('_actuallySend',
+    renderedRequest,
+    workspace._id,
+    settings,
+    environment?._id,
+    settings.validateSSL,
+  ) : await curl._actuallySend(
     renderedRequest,
     workspace._id,
     settings,
