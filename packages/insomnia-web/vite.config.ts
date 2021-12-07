@@ -4,11 +4,18 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      babel: {
+        parserOpts: { plugins: ['decorators-legacy'] }
+      },
+    })
+  ],
   resolve: {
-    mainFields:['browser'],
+    mainFields: ['browser'],
     alias: {
-     "crypto": path.resolve(__dirname, '../insomnia-app/node_modules/crypto-browserify'),
+      "crypto": path.resolve(__dirname, '../insomnia-app/node_modules/crypto-browserify'),
+      "path": path.resolve(__dirname, '../insomnia-app/node_modules/path-browserify'),
     }
   }
 })
