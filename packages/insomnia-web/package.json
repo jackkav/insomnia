@@ -7,6 +7,15 @@
     "serve": "vite preview"
   },
   "dependencies": {
+    "insomnia-common": "2.4.0",
+    "insomnia-components": "2.4.0",
+    "insomnia-config": "2.4.0",
+    "insomnia-cookies": "2.4.0",
+    "insomnia-importers": "2.4.0",
+    "insomnia-prettify": "2.4.0",
+    "insomnia-testing": "2.4.0",
+    "insomnia-url": "2.4.0",
+    "insomnia-xpath": "2.4.0",
     "react": "^17.0.0",
     "react-dom": "^17.0.0"
   },

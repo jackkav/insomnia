@@ -5,11 +5,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
-    react({
-      babel: {
-        parserOpts: { plugins: ['decorators-legacy'] }
-      },
-    })
+    react({ babel: { parserOpts: { plugins: ['decorators-legacy'] } } })
   ],
   resolve: {
     mainFields: ['browser'],
@@ -17,5 +13,18 @@ export default defineConfig({
       "crypto": path.resolve(__dirname, '../insomnia-app/node_modules/crypto-browserify'),
       "path": path.resolve(__dirname, '../insomnia-app/node_modules/path-browserify'),
     }
-  }
+  },
+  optimizeDeps: {
+    include: [
+      'insomnia-xpath',
+      'insomnia-prettify',
+      'insomnia-testing',
+      'insomnia-importers',
+      'insomnia-components',
+      'insomnia-common',
+      'insomnia-cookies',
+      'insomnia-url',
+      'insomnia-config'
+    ],
+  },
 })
