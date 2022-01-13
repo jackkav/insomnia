@@ -1,13 +1,14 @@
-// Note: we cannot import these from `node-libcurl` like normal because they come from the native library and it's not possible to load it while testing because it was built to run with Electron.
-// That applies to these Enum type imports, but also applies to the members of the class below.
-import { CurlAuth } from '@getinsomnia/node-libcurl/dist/enum/CurlAuth';
-import { CurlCode } from '@getinsomnia/node-libcurl/dist/enum/CurlCode';
-import { CurlFeature } from '@getinsomnia/node-libcurl/dist/enum/CurlFeature';
-import { CurlHttpVersion } from '@getinsomnia/node-libcurl/dist/enum/CurlHttpVersion';
-import { CurlInfoDebug } from '@getinsomnia/node-libcurl/dist/enum/CurlInfoDebug';
-import { CurlNetrc } from '@getinsomnia/node-libcurl/dist/enum/CurlNetrc';
+
 import { EventEmitter } from 'events';
 import fs from 'fs';
+
+// Note: we cannot import these from `node-libcurl` like normal because they come from the native library and it's not possible to load it while testing because it was built to run with Electron.
+// That applies to these Enum type imports, but also applies to the members of the class below.
+import { CurlAuth } from '../../network/curl-enum/Curl';
+import { CurlCode } from '../../network/curl-enum/Curl';
+import { CurlHttpVersion } from '../../network/curl-enum/Curl';
+import { CurlInfoDebug } from '../../network/curl-enum/Curl';
+import { CurlNetrc } from '../../network/curl-enum/Curl';
 
 class Curl extends EventEmitter {
   _options = {};
@@ -196,7 +197,6 @@ module.exports = {
   CurlAuth: getTsEnumOnlyWithNamedMembers(CurlAuth),
   CurlCode: getTsEnumOnlyWithNamedMembers(CurlCode),
   CurlInfoDebug: getTsEnumOnlyWithNamedMembers(CurlInfoDebug),
-  CurlFeature: getTsEnumOnlyWithNamedMembers(CurlFeature),
   CurlNetrc: getTsEnumOnlyWithNamedMembers(CurlNetrc),
   CurlHttpVersion: getTsEnumOnlyWithNamedMembers(CurlHttpVersion),
 };

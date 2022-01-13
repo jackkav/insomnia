@@ -1,4 +1,3 @@
-import { CurlHttpVersion } from '@getinsomnia/node-libcurl';
 import fs from 'fs';
 import { HttpVersions } from 'insomnia-common';
 import { join as pathJoin, resolve as pathResolve } from 'path';
@@ -16,6 +15,7 @@ import {
 import { filterHeaders } from '../../common/misc';
 import { getRenderedRequestAndContext } from '../../common/render';
 import * as models from '../../models';
+import { CurlHttpVersion } from '../curl-enum/Curl';
 import { DEFAULT_BOUNDARY } from '../multipart';
 import * as networkUtils from '../network';
 
