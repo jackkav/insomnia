@@ -8,12 +8,12 @@ import { CurlAuth, CurlEnums, CurlInfoDebug } from './curl-enum/Curl';
 
 class NotCurl extends EventEmitter {
   reqOptions: AxiosRequestConfig;
-  sslVerify: boolean;
   writeListener: any;
-  responseBodyBytes: number;
   debugListener: any;
+  // NOTE: these are for solving assignment ordering problems
+  sslVerify: boolean;
+  responseBodyBytes: number;
   elapsedTime: number;
-  postData: any;
   followRedirects: boolean;
   caBundle: string | Buffer | (string | Buffer)[] | undefined;
   username: any;
@@ -26,7 +26,6 @@ class NotCurl extends EventEmitter {
     this.sslVerify = true;
     this.responseBodyBytes = 0;
     this.elapsedTime = 0;
-    this.postData = '';
   }
   static option = CurlEnums.option;
   static info = CurlEnums.info;
@@ -54,6 +53,7 @@ class NotCurl extends EventEmitter {
         this.followRedirects = val;
         break;
       case 'PROXY':
+        // NOTE: explicitly ignore system env var HTTP/S_PROXY and NO_PROXY
         if (val === '') this.reqOptions.proxy = false;
         else {
           const { hostname, port } = new URL(val);
@@ -107,20 +107,24 @@ class NotCurl extends EventEmitter {
         this.debugListener = val;
         break;
       case 'HTTPHEADER':
-        // TODO
-        // val.map(x => {
-        //   const name = x.split(':')[0];
-        //   this.reqOptions.headers[name] = x.split(':')[1].trim();
-        // });
+        val.map(x => {
+          const name = x.split(':')[0];
+          // NOTE: skip empty header values
+          if (x.split(':')[1]?.trim()) this.reqOptions.headers[name] = x.split(':')[1]?.trim();
+        });
         break;
       case 'USERAGENT':
         this.reqOptions.headers['User-Agent'] = val;
         break;
       case 'COOKIELIST':
-        this.reqOptions.headers['Set-Cookie'] = val;
+        // this.reqOptions.headers['Set-Cookie'] = val;
+        break;
+      case 'COOKIEFILE':
+        // do nothing
         break;
       case 'COOKIE':
         // TODO: append to set-cookie?
+        // this.reqOptions.headers['Cookie'] = val;
         break;
       default:
         console.log('unhandled option', opt, name, val);
@@ -145,24 +149,39 @@ class NotCurl extends EventEmitter {
     this.reqOptions.responseType = 'stream';
     this.reqOptions.validateStatus = () => true;
     const startTime = performance.now();
-    console.log('perform', this.reqOptions);
     axios.request(this.reqOptions)
-      .then(response => {
-        response.data.on('data', chunk => {
+      .then(({ data, status, statusText, headers, config, request }) => {
+        console.log('perform', { data, status, statusText, headers, config, request });
+
+        this.debugListener(CurlInfoDebug.HeaderOut, request._header);
+
+        if (this.reqOptions.data !== undefined) this.debugListener(CurlInfoDebug.DataOut, this.reqOptions.data);
+
+        // NOTE: axios chops HTTP/1.1 200 Success off the top of the raw header string
+        this.debugListener(CurlInfoDebug.HeaderIn, `HTTP/${data.httpVersion} ${status} ${statusText}`);
+        Object.entries(data.headers)
+          .map(([name, value]) => `${name}: ${value}`)
+          .map(h => this.debugListener(CurlInfoDebug.HeaderIn, h));
+
+        data.on('data', chunk => {
           this.responseBodyBytes += chunk.length;
           this.writeListener(chunk);
-          // IDEA: CurlInfoDebug could be replaced with a mimetype/content-type check
           this.debugListener(CurlInfoDebug.DataIn, chunk);
         });
-        response.data.on('end', () => {
-          console.log('No more data in response.', response.config);
+        data.on('end', () => {
           this.elapsedTime = performance.now() - startTime;
           const rawHeaders = [{
-            version: 'HTTP1.1', // TODO: what?
-            code: response.status,
-            reason: response.statusText,
-            headers: Object.entries(response.headers).map(([name, value]) => ({ name, value })),
+            version: 'HTTP/' + data.httpVersion,
+            code: status,
+            reason: statusText,
+            headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
           }];
+
+          // const minimalHeaders = ['HTTP/1.1 301', ''];
+          // const rawHeaders = [`HTTP/${response.data.httpVersion} ${response.data.statusCode} ${response.data.statusMessage}`, ...Object.entries(response.data.headers).map(([name, value]) => `${name}: ${value}`)];
+          // console.log('rawHeaders', rawHeaders);
+          // this.emit('end', null, null, Buffer.from(rawHeaders.join('\n')));
+          console.log('No more data in response.', rawHeaders);
           this.emit('end', null, null, rawHeaders);
         });
       }).catch(e => this.emit('error', e));
