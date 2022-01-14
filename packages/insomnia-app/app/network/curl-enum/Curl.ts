@@ -86,3 +86,8 @@ export enum CurlNetrc {
   Optional,
   Required,
 }
+export enum CurlFeature {
+  NoDataParsing = 1 << 0,
+  NoHeaderParsing = 1 << 1,
+  Raw = NoDataParsing | NoHeaderParsing,
+}

@@ -135,7 +135,8 @@ class NotCurl extends EventEmitter {
         console.log('unhandled option', opt, name, val);
     }
   }
-  enable() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  enable(_) {
     // ignore this, as its only used for disabling auto parsing of headers and body
   }
   perform() {
@@ -201,4 +202,4 @@ class NotCurl extends EventEmitter {
 }
 
 export { NotCurl as Curl };
-export { CurlAuth, CurlCode, CurlHttpVersion, CurlInfoDebug, CurlNetrc } from './curl-enum/Curl';
+export { CurlAuth, CurlCode, CurlFeature, CurlHttpVersion, CurlInfoDebug, CurlNetrc } from './curl-enum/Curl';

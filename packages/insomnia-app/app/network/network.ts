@@ -61,6 +61,7 @@ import {
   Curl,
   CurlAuth,
   CurlCode,
+  CurlFeature,
   CurlHttpVersion,
   CurlInfoDebug,
   CurlNetrc,
@@ -245,16 +246,16 @@ export async function _actuallySend(
       };
 
       // Set all the basic options
-      // setOpt(Curl.option.VERBOSE, true); NOTE: not needed for axios
+      setOpt(Curl.option.VERBOSE, true); // NOTE: not needed for axios
 
       // True so debug function works\
-      // setOpt(Curl.option.NOPROGRESS, true); NOTE: not needed for axios
+      setOpt(Curl.option.NOPROGRESS, true); // NOTE: not needed for axios
 
       // True so curl doesn't print progress
-      // setOpt(Curl.option.ACCEPT_ENCODING, ''); NOTE: not needed for axios
+      setOpt(Curl.option.ACCEPT_ENCODING, ''); // NOTE: not needed for axios
 
       // Auto decode everything
-      // curl.enable(CurlFeature.Raw); NOTE: not needed for axios
+      curl.enable(CurlFeature.Raw); // NOTE: not needed for axios
 
       // Set follow redirects setting
       switch (renderedRequest.settingFollowRedirects) {
@@ -1042,13 +1043,6 @@ async function _applyResponsePluginHooks(
     };
   }
 
-}
-
-interface HeaderResult {
-  headers: ResponseHeader[];
-  version: string;
-  code: number;
-  reason: string;
 }
 
 // exported for unit tests only

@@ -4,11 +4,7 @@ import fs from 'fs';
 
 // Note: we cannot import these from `node-libcurl` like normal because they come from the native library and it's not possible to load it while testing because it was built to run with Electron.
 // That applies to these Enum type imports, but also applies to the members of the class below.
-import { CurlAuth } from '../../network/curl-enum/Curl';
-import { CurlCode } from '../../network/curl-enum/Curl';
-import { CurlHttpVersion } from '../../network/curl-enum/Curl';
-import { CurlInfoDebug } from '../../network/curl-enum/Curl';
-import { CurlNetrc } from '../../network/curl-enum/Curl';
+import { CurlAuth, CurlCode, CurlFeature, CurlHttpVersion, CurlInfoDebug, CurlNetrc } from '../../network/curl-enum/Curl';
 
 class Curl extends EventEmitter {
   _options = {};
@@ -154,12 +150,11 @@ class Curl extends EventEmitter {
           'end',
           'NOT_USED',
           'NOT_USED',
-          [
-            'HTTP/1.1 200 OK',
-            `Content-Length: ${data.length}`,
-            'Content-Type: application/json',
-            '',
-          ].join('\n'),
+          [{
+            version: 'HTTP/1.1',
+            code: '200',
+            reason: 'OK',
+          }]
         );
       });
     });
@@ -197,6 +192,7 @@ module.exports = {
   CurlAuth: getTsEnumOnlyWithNamedMembers(CurlAuth),
   CurlCode: getTsEnumOnlyWithNamedMembers(CurlCode),
   CurlInfoDebug: getTsEnumOnlyWithNamedMembers(CurlInfoDebug),
+  CurlFeature: getTsEnumOnlyWithNamedMembers(CurlFeature),
   CurlNetrc: getTsEnumOnlyWithNamedMembers(CurlNetrc),
   CurlHttpVersion: getTsEnumOnlyWithNamedMembers(CurlHttpVersion),
 };

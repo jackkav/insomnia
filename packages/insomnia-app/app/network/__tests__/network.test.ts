@@ -15,12 +15,13 @@ import {
 import { filterHeaders } from '../../common/misc';
 import { getRenderedRequestAndContext } from '../../common/render';
 import * as models from '../../models';
-import { CurlHttpVersion } from '../curl-enum/Curl';
+import { CurlHttpVersion } from '../curl-shim';
 import { DEFAULT_BOUNDARY } from '../multipart';
 import * as networkUtils from '../network';
 
-const getRenderedRequest = async (args: Parameters<typeof getRenderedRequestAndContext>[0]) => (await getRenderedRequestAndContext(args)).request;
+jest.mock('../curl-shim');
 
+const getRenderedRequest = async (args: Parameters<typeof getRenderedRequestAndContext>[0]) => (await getRenderedRequestAndContext(args)).request;
 describe('actuallySend()', () => {
   beforeEach(async () => {
     await globalBeforeEach();
