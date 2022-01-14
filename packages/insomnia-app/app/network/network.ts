@@ -1051,44 +1051,6 @@ interface HeaderResult {
   reason: string;
 }
 
-export function _parseHeaders(
-  buffer: Buffer,
-) {
-  const results: HeaderResult[] = [];
-  const lines = buffer.toString('utf8').split(/\r?\n|\r/g);
-
-  for (let i = 0, currentResult: HeaderResult | null = null; i < lines.length; i++) {
-    const line = lines[i];
-    const isEmptyLine = line.trim() === '';
-
-    // If we hit an empty line, start parsing the next response
-    if (isEmptyLine && currentResult) {
-      results.push(currentResult);
-      currentResult = null;
-      continue;
-    }
-
-    if (!currentResult) {
-      const [version, code, ...other] = line.split(/ +/g);
-      currentResult = {
-        version,
-        code: parseInt(code, 10),
-        reason: other.join(' '),
-        headers: [],
-      };
-    } else {
-      const [name, value] = line.split(/:\s(.+)/);
-      const header: ResponseHeader = {
-        name,
-        value: value || '',
-      };
-      currentResult.headers.push(header);
-    }
-  }
-
-  return results;
-}
-
 // exported for unit tests only
 export function _getAwsAuthHeaders(
   credentials: {

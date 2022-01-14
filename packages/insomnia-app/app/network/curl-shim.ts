@@ -19,6 +19,7 @@ class NotCurl extends EventEmitter {
   username: any;
   password: any;
   httpAuth: any;
+  cookies: string[];
 
   constructor() {
     super();
@@ -26,6 +27,7 @@ class NotCurl extends EventEmitter {
     this.sslVerify = true;
     this.responseBodyBytes = 0;
     this.elapsedTime = 0;
+    this.cookies = [];
   }
   static option = CurlEnums.option;
   static info = CurlEnums.info;
@@ -81,6 +83,9 @@ class NotCurl extends EventEmitter {
       case 'CUSTOMREQUEST':
         this.reqOptions.method = val;
         break;
+      case 'READDATA':
+        this.reqOptions.data = fs.readFileSync(val, 'utf8');
+        break;
       case 'TIMEOUT_MS':
         this.reqOptions.timeout = val;
         break;
@@ -118,13 +123,13 @@ class NotCurl extends EventEmitter {
         break;
       case 'COOKIELIST':
         // this.reqOptions.headers['Set-Cookie'] = val;
+        console.log('cookielist', val);
         break;
       case 'COOKIEFILE':
         // do nothing
         break;
       case 'COOKIE':
-        // TODO: append to set-cookie?
-        // this.reqOptions.headers['Cookie'] = val;
+        this.cookies.push(val);
         break;
       default:
         console.log('unhandled option', opt, name, val);
@@ -134,12 +139,15 @@ class NotCurl extends EventEmitter {
     // ignore this, as its only used for disabling auto parsing of headers and body
   }
   perform() {
+
+    if (this.cookies.length) this.reqOptions.headers['Cookie'] = this.cookies.join(';');
     // NOTE: disable follow redirects https://github.com/axios/axios/pull/307/files#diff-586c04c24
     if (!this.followRedirects) this.reqOptions.maxRedirects = 0;
-    const agentConfig: https.AgentOptions = {
-      rejectUnauthorized: this.sslVerify,
-      ca: this.caBundle,
-    };
+    const agentConfig: https.AgentOptions = { rejectUnauthorized: this.sslVerify };
+    if (this.caBundle) {
+      agentConfig.ca = this.caBundle;
+    }
+
     // TODO: digest, ntlm, netrc etc
     if (this.httpAuth === CurlAuth.Basic) {
       this.reqOptions.auth = { username: this.username, password: this.password };
@@ -152,6 +160,9 @@ class NotCurl extends EventEmitter {
     axios.request(this.reqOptions)
       .then(({ data, status, statusText, headers, config, request }) => {
         console.log('perform', { data, status, statusText, headers, config, request });
+        if (this.caBundle) this.debugListener(CurlInfoDebug.Text, `Found bundle for host ${request.host} (#1)`);
+
+        this.debugListener(CurlInfoDebug.Text, `Connected to ${request.host} (#1)`);
 
         this.debugListener(CurlInfoDebug.HeaderOut, request._header);
 
@@ -170,19 +181,14 @@ class NotCurl extends EventEmitter {
         });
         data.on('end', () => {
           this.elapsedTime = performance.now() - startTime;
-          const rawHeaders = [{
+
+          this.emit('end', null, null, [{
             version: 'HTTP/' + data.httpVersion,
             code: status,
             reason: statusText,
             headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-          }];
-
-          // const minimalHeaders = ['HTTP/1.1 301', ''];
-          // const rawHeaders = [`HTTP/${response.data.httpVersion} ${response.data.statusCode} ${response.data.statusMessage}`, ...Object.entries(response.data.headers).map(([name, value]) => `${name}: ${value}`)];
-          // console.log('rawHeaders', rawHeaders);
-          // this.emit('end', null, null, Buffer.from(rawHeaders.join('\n')));
-          console.log('No more data in response.', rawHeaders);
-          this.emit('end', null, null, rawHeaders);
+          }]);
+          this.debugListener(CurlInfoDebug.Text, `Connection #1 to host ${request.host} left intact`);
         });
       }).catch(e => this.emit('error', e));
   }
