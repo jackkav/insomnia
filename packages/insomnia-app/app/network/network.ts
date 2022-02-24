@@ -9,6 +9,7 @@ import clone from 'clone';
 import crypto from 'crypto';
 import fs from 'fs';
 import { HttpVersions } from 'insomnia-common';
+import { cookiesFromJar, jarFromCookies } from 'insomnia-cookies';
 import {
   buildQueryStringFromParams,
   joinUrlAndQueryString,
@@ -16,8 +17,10 @@ import {
   smartEncodeUrl,
 } from 'insomnia-url';
 import mkdirp from 'mkdirp';
+import path from 'path';
 import { join as pathJoin } from 'path';
-import { parse as urlParse } from 'url';
+import { parse as urlParse, resolve as urlResolve } from 'url';
+import uuid from 'uuid';
 
 import {
   AUTH_AWS_IAM,
@@ -35,6 +38,8 @@ import {
   delay,
   getContentTypeHeader,
   getHostHeader,
+  getLocationHeader,
+  getSetCookieHeaders,
   hasAcceptEncodingHeader,
   hasAcceptHeader,
   hasAuthHeader,
@@ -162,7 +167,7 @@ export async function _actuallySend(
     async function respond(
       patch: ResponsePatch,
       bodyPath: string | null,
-      debugTimeline: any[]
+      debugTimeline: any[] = []
     ) {
 
       const timelinePath = await storeTimeline([...timeline, ...debugTimeline]);
@@ -473,7 +478,8 @@ export async function _actuallySend(
       let noBody = false;
       let requestBody: string | null = null;
       const expectsBody = ['POST', 'PUT', 'PATCH'].includes(renderedRequest.method.toUpperCase());
-
+      let closePostEventEmitter = () => {};
+      let closePostMultipartEventEmitter = () => {};
       if (renderedRequest.body.mimeType === CONTENT_TYPE_FORM_URLENCODED) {
         requestBody = buildQueryStringFromParams(renderedRequest.body.params || [], false);
       } else if (renderedRequest.body.mimeType === CONTENT_TYPE_FORM_DATA) {
@@ -500,15 +506,12 @@ export async function _actuallySend(
         // We need this, otherwise curl will send it as a PUT
         setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
 
-        // const fn = () => {
-        //   fs.closeSync(fd);
-        //   fs.unlink(multipartBodyPath, () => {
-        //     // Pass
-        //   });
-        // };
-
-        // curl.on('end', fn);
-        // curl.on('error', fn);
+        closePostMultipartEventEmitter = () => {
+          fs.closeSync(fd);
+          fs.unlink(multipartBodyPath, () => {
+            // Pass
+          });
+        };
       } else if (renderedRequest.body.fileName) {
         const { size } = fs.statSync(renderedRequest.body.fileName);
         const fileName = renderedRequest.body.fileName || '';
@@ -518,11 +521,7 @@ export async function _actuallySend(
         setOpt(Curl.option.READDATA, fd);
         // We need this, otherwise curl will send it as a POST
         setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
-
-        // const fn = () => fs.closeSync(fd);
-
-        // curl.on('end', fn);
-        // curl.on('error', fn);
+        closePostEventEmitter = () => fs.closeSync(fd);
       } else if (typeof renderedRequest.body.mimeType === 'string' || expectsBody) {
         requestBody = renderedRequest.body.text || '';
       } else {
@@ -647,8 +646,76 @@ export async function _actuallySend(
           }
         });
       setOpt(Curl.option.HTTPHEADER, headerStrings);
-      const res = await libCurlPromise(options);
-      respond(res, res.bodyPath || null, res.debugTimeline);
+      const responsesDir = pathJoin(getDataDirectory(), 'responses');
+      mkdirp.sync(responsesDir);
+      const responseBodyPath = pathJoin(responsesDir, uuid.v4() + '.response');
+
+      const { patch, debugTimeline, headerArray } = await libCurlPromise(options, responseBodyPath, settings.maxTimelineDataSizeKB);
+
+      closePostEventEmitter();
+      closePostMultipartEventEmitter();
+
+      // Headers are an array (one for each redirect)
+      const lastCurlHeadersObject = headerArray[headerArray.length - 1];
+
+      // Calculate the content type
+      const contentTypeHeader = getContentTypeHeader(lastCurlHeadersObject.headers);
+      // Update Cookie Jar
+      let currentUrl = finalUrl;
+      let setCookieStrings: string[] = [];
+      const jar = jarFromCookies(renderedRequest.cookieJar.cookies);
+
+      for (const { resHeaders } of headerArray) {
+        // Collect Set-Cookie headers
+        const setCookieHeaders = getSetCookieHeaders(resHeaders);
+        setCookieStrings = [...setCookieStrings, ...setCookieHeaders.map(h => h.value)];
+        // Pull out new URL if there is a redirect
+        const newLocation = getLocationHeader(resHeaders);
+
+        if (newLocation !== null) {
+          currentUrl = urlResolve(currentUrl, newLocation.value);
+        }
+      }
+
+      // Update jar with Set-Cookie headers
+      for (const setCookieStr of setCookieStrings) {
+        try {
+          jar.setCookieSync(setCookieStr, currentUrl);
+        } catch (err) {
+          addTimelineText(`Rejected cookie: ${err.message}`);
+        }
+      }
+
+      // Update cookie jar if we need to and if we found any cookies
+      if (renderedRequest.settingStoreCookies && setCookieStrings.length) {
+        const cookies = await cookiesFromJar(jar);
+        await models.cookieJar.update(renderedRequest.cookieJar, {
+          cookies,
+        });
+      }
+
+      // Print informational message
+      if (setCookieStrings.length > 0) {
+        const n = setCookieStrings.length;
+
+        if (renderedRequest.settingStoreCookies) {
+          addTimelineText(`Saved ${n} cookie${n === 1 ? '' : 's'}`);
+        } else {
+          addTimelineText(`Ignored ${n} cookie${n === 1 ? '' : 's'}`);
+        }
+      }
+
+      const responsePatch: ResponsePatch = {
+        contentType: contentTypeHeader ? contentTypeHeader.value : '',
+        headers: lastCurlHeadersObject.headers,
+        httpVersion: lastCurlHeadersObject.version || '',
+        statusCode: lastCurlHeadersObject.code || -1,
+        statusMessage: lastCurlHeadersObject.reason || '',
+        ...patch,
+      };
+
+      respond(responsePatch, responseBodyPath, debugTimeline);
+
     } catch (err) {
       console.log('[network] Error', err);
       await handleError(err);
@@ -876,51 +943,6 @@ async function _applyResponsePluginHooks(
     };
   }
 
-}
-
-interface HeaderResult {
-  headers: ResponseHeader[];
-  version: string;
-  code: number;
-  reason: string;
-}
-
-export function _parseHeaders(
-  buffer: Buffer,
-) {
-  const results: HeaderResult[] = [];
-  const lines = buffer.toString('utf8').split(/\r?\n|\r/g);
-
-  for (let i = 0, currentResult: HeaderResult | null = null; i < lines.length; i++) {
-    const line = lines[i];
-    const isEmptyLine = line.trim() === '';
-
-    // If we hit an empty line, start parsing the next response
-    if (isEmptyLine && currentResult) {
-      results.push(currentResult);
-      currentResult = null;
-      continue;
-    }
-
-    if (!currentResult) {
-      const [version, code, ...other] = line.split(/ +/g);
-      currentResult = {
-        version,
-        code: parseInt(code, 10),
-        reason: other.join(' '),
-        headers: [],
-      };
-    } else {
-      const [name, value] = line.split(/:\s(.+)/);
-      const header: ResponseHeader = {
-        name,
-        value: value || '',
-      };
-      currentResult.headers.push(header);
-    }
-  }
-
-  return results;
 }
 
 // exported for unit tests only
