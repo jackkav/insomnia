@@ -1,10 +1,7 @@
 import {
   Curl,
   CurlAuth,
-  CurlCode,
-  CurlFeature,
   CurlHttpVersion,
-  CurlInfoDebug,
   CurlNetrc,
 } from '@getinsomnia/node-libcurl';
 import aws4 from 'aws4';
@@ -12,7 +9,6 @@ import clone from 'clone';
 import crypto from 'crypto';
 import fs from 'fs';
 import { HttpVersions } from 'insomnia-common';
-import { cookiesFromJar, jarFromCookies } from 'insomnia-cookies';
 import {
   buildQueryStringFromParams,
   joinUrlAndQueryString,
@@ -21,8 +17,7 @@ import {
 } from 'insomnia-url';
 import mkdirp from 'mkdirp';
 import { join as pathJoin } from 'path';
-import { parse as urlParse, resolve as urlResolve } from 'url';
-import * as uuid from 'uuid';
+import { parse as urlParse } from 'url';
 
 import {
   AUTH_AWS_IAM,
@@ -38,17 +33,13 @@ import { database as db } from '../common/database';
 import { getDataDirectory, getTempDir } from '../common/electron-helpers';
 import {
   delay,
-  describeByteSize,
   getContentTypeHeader,
   getHostHeader,
-  getLocationHeader,
-  getSetCookieHeaders,
   hasAcceptEncodingHeader,
   hasAcceptHeader,
   hasAuthHeader,
   hasContentTypeHeader,
   hasUserAgentHeader,
-  waitForStreamToFinish,
 } from '../common/misc';
 import type { ExtraRenderInfo, RenderedRequest } from '../common/render';
 import {
@@ -66,6 +57,7 @@ import * as pluginContexts from '../plugins/context/index';
 import * as plugins from '../plugins/index';
 import { getAuthHeader } from './authentication';
 import caCerts from './ca-certs';
+import { libCurlPromise } from './libcurl-promise';
 import { buildMultipart } from './multipart';
 import { urlMatchesCertHost } from './url-matches-cert-host';
 
@@ -95,18 +87,6 @@ const MAX_DELAY_TIME = 1000;
 
 // Special header value that will prevent the header being sent
 const DISABLE_HEADER_VALUE = '__Di$aB13d__';
-
-// Because node-libcurl changed some names that we used in the timeline
-const LIBCURL_DEBUG_MIGRATION_MAP = {
-  HeaderIn: 'HEADER_IN',
-  DataIn: 'DATA_IN',
-  SslDataIn: 'SSL_DATA_IN',
-  HeaderOut: 'HEADER_OUT',
-  DataOut: 'DATA_OUT',
-  SslDataOut: 'SSL_DATA_OUT',
-  Text: 'TEXT',
-  '': '',
-};
 
 const cancelRequestFunctionMap = {};
 
@@ -182,8 +162,10 @@ export async function _actuallySend(
     async function respond(
       patch: ResponsePatch,
       bodyPath: string | null,
+      debugTimeline: any[]
     ) {
-      const timelinePath = await storeTimeline(timeline);
+
+      const timelinePath = await storeTimeline([...timeline, ...debugTimeline]);
       // Tear Down the cancellation logic
       clearCancelFunctionForId(renderedRequest._id);
       const environmentId = environment ? environment._id : null;
@@ -217,15 +199,11 @@ export async function _actuallySend(
         null,
       );
     }
-
+    const options = {};
     /** Helper function to set Curl options */
-    const setOpt: typeof curl.setOpt = (opt: any, val: any) => {
-      try {
-        return curl.setOpt(opt, val);
-      } catch (err) {
-        const name = Object.keys(Curl.option).find(name => Curl.option[name] === opt);
-        throw new Error(`${err.message} (${opt} ${name || 'n/a'})`);
-      }
+    const setOpt = (opt: any, val: any) => {
+      const name = Object.keys(Curl.option).find(name => Curl.option[name] === opt);
+      if (name)options[name] = val;
     };
 
     try {
@@ -255,9 +233,6 @@ export async function _actuallySend(
 
       // True so curl doesn't print progress
       setOpt(Curl.option.ACCEPT_ENCODING, '');
-
-      // Auto decode everything
-      curl.enable(CurlFeature.Raw);
 
       // Set follow redirects setting
       switch (renderedRequest.settingFollowRedirects) {
@@ -305,42 +280,6 @@ export async function _actuallySend(
           break;
       }
 
-      // Setup debug handler
-      setOpt(Curl.option.DEBUGFUNCTION, (infoType, contentBuffer) => {
-        const content = contentBuffer.toString('utf8');
-        const rawName = Object.keys(CurlInfoDebug).find(k => CurlInfoDebug[k] === infoType) || '';
-        const name = LIBCURL_DEBUG_MIGRATION_MAP[rawName] || rawName;
-
-        if (infoType === CurlInfoDebug.SslDataIn || infoType === CurlInfoDebug.SslDataOut) {
-          return 0;
-        }
-
-        // Ignore the possibly large data messages
-        if (infoType === CurlInfoDebug.DataOut) {
-          if (contentBuffer.length === 0) {
-            // Sometimes this happens, but I'm not sure why. Just ignore it.
-          } else if (contentBuffer.length / 1024 < settings.maxTimelineDataSizeKB) {
-            addTimeline(name, content);
-          } else {
-            addTimeline(name, `(${describeByteSize(contentBuffer.length)} hidden)`);
-          }
-
-          return 0;
-        }
-
-        if (infoType === CurlInfoDebug.DataIn) {
-          addTimelineText(`Received ${describeByteSize(contentBuffer.length)} chunk`);
-          return 0;
-        }
-
-        // Don't show cookie setting because this will display every domain in the jar
-        if (infoType === CurlInfoDebug.Text && content.indexOf('Added cookie') === 0) {
-          return 0;
-        }
-
-        addTimeline(name, content);
-        return 0; // Must be here
-      });
       // Set the headers (to be modified as we go)
       const headers = clone(renderedRequest.headers);
       // Set the URL, including the query parameters
@@ -561,15 +500,15 @@ export async function _actuallySend(
         // We need this, otherwise curl will send it as a PUT
         setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
 
-        const fn = () => {
-          fs.closeSync(fd);
-          fs.unlink(multipartBodyPath, () => {
-            // Pass
-          });
-        };
+        // const fn = () => {
+        //   fs.closeSync(fd);
+        //   fs.unlink(multipartBodyPath, () => {
+        //     // Pass
+        //   });
+        // };
 
-        curl.on('end', fn);
-        curl.on('error', fn);
+        // curl.on('end', fn);
+        // curl.on('error', fn);
       } else if (renderedRequest.body.fileName) {
         const { size } = fs.statSync(renderedRequest.body.fileName);
         const fileName = renderedRequest.body.fileName || '';
@@ -580,10 +519,10 @@ export async function _actuallySend(
         // We need this, otherwise curl will send it as a POST
         setOpt(Curl.option.CUSTOMREQUEST, renderedRequest.method);
 
-        const fn = () => fs.closeSync(fd);
+        // const fn = () => fs.closeSync(fd);
 
-        curl.on('end', fn);
-        curl.on('error', fn);
+        // curl.on('end', fn);
+        // curl.on('error', fn);
       } else if (typeof renderedRequest.body.mimeType === 'string' || expectsBody) {
         requestBody = renderedRequest.body.text || '';
       } else {
@@ -708,118 +647,8 @@ export async function _actuallySend(
           }
         });
       setOpt(Curl.option.HTTPHEADER, headerStrings);
-      let responseBodyBytes = 0;
-      const responsesDir = pathJoin(getDataDirectory(), 'responses');
-      mkdirp.sync(responsesDir);
-      const responseBodyPath = pathJoin(responsesDir, uuid.v4() + '.response');
-      const responseBodyWriteStream = fs.createWriteStream(responseBodyPath);
-      curl.on('end', () => responseBodyWriteStream.end());
-      curl.on('error', () => responseBodyWriteStream.end());
-      setOpt(Curl.option.WRITEFUNCTION, buff => {
-        responseBodyBytes += buff.length;
-        responseBodyWriteStream.write(buff);
-        return buff.length;
-      });
-      // Handle the response ending
-      curl.on('end', async (_1, _2, rawHeaders: Buffer) => {
-        const allCurlHeadersObjects = _parseHeaders(rawHeaders);
-
-        // Headers are an array (one for each redirect)
-        const lastCurlHeadersObject = allCurlHeadersObjects[allCurlHeadersObjects.length - 1];
-        // Collect various things
-        const httpVersion = lastCurlHeadersObject.version || '';
-        const statusCode = lastCurlHeadersObject.code || -1;
-        const statusMessage = lastCurlHeadersObject.reason || '';
-        // Collect the headers
-        const headers = lastCurlHeadersObject.headers;
-        // Calculate the content type
-        const contentTypeHeader = getContentTypeHeader(headers);
-        const contentType = contentTypeHeader ? contentTypeHeader.value : '';
-        // Update Cookie Jar
-        let currentUrl = finalUrl;
-        let setCookieStrings: string[] = [];
-        const jar = jarFromCookies(renderedRequest.cookieJar.cookies);
-
-        for (const { headers } of allCurlHeadersObjects) {
-          // Collect Set-Cookie headers
-          const setCookieHeaders = getSetCookieHeaders(headers);
-          setCookieStrings = [...setCookieStrings, ...setCookieHeaders.map(h => h.value)];
-          // Pull out new URL if there is a redirect
-          const newLocation = getLocationHeader(headers);
-
-          if (newLocation !== null) {
-            currentUrl = urlResolve(currentUrl, newLocation.value);
-          }
-        }
-
-        // Update jar with Set-Cookie headers
-        for (const setCookieStr of setCookieStrings) {
-          try {
-            jar.setCookieSync(setCookieStr, currentUrl);
-          } catch (err) {
-            addTimelineText(`Rejected cookie: ${err.message}`);
-          }
-        }
-
-        // Update cookie jar if we need to and if we found any cookies
-        if (renderedRequest.settingStoreCookies && setCookieStrings.length) {
-          const cookies = await cookiesFromJar(jar);
-          await models.cookieJar.update(renderedRequest.cookieJar, {
-            cookies,
-          });
-        }
-
-        // Print informational message
-        if (setCookieStrings.length > 0) {
-          const n = setCookieStrings.length;
-
-          if (renderedRequest.settingStoreCookies) {
-            addTimelineText(`Saved ${n} cookie${n === 1 ? '' : 's'}`);
-          } else {
-            addTimelineText(`Ignored ${n} cookie${n === 1 ? '' : 's'}`);
-          }
-        }
-
-        // Return the response data
-        const responsePatch: ResponsePatch = {
-          contentType,
-          headers,
-          httpVersion,
-          statusCode,
-          statusMessage,
-          bytesContent: responseBodyBytes,
-          // @ts-expect-error -- TSCONVERSION appears to be a genuine error
-          bytesRead: curl.getInfo(Curl.info.SIZE_DOWNLOAD),
-          elapsedTime: curl.getInfo(Curl.info.TOTAL_TIME) as number * 1000,
-          // @ts-expect-error -- TSCONVERSION appears to be a genuine error
-          url: curl.getInfo(Curl.info.EFFECTIVE_URL),
-        };
-        // Close the request
-        curl.close();
-        // Make sure the response body has been fully written first
-        await waitForStreamToFinish(responseBodyWriteStream);
-        // Send response
-        await respond(responsePatch, responseBodyPath);
-      });
-      curl.on('error', async function(err, code) {
-        let error = err + '';
-        let statusMessage = 'Error';
-
-        if (code === CurlCode.CURLE_ABORTED_BY_CALLBACK) {
-          error = 'Request aborted';
-          statusMessage = 'Abort';
-        }
-
-        await respond(
-          {
-            statusMessage,
-            error: error || 'Something went wrong',
-            elapsedTime: curl.getInfo(Curl.info.TOTAL_TIME) as number * 1000,
-          },
-          null,
-        );
-      });
-      curl.perform();
+      const res = await libCurlPromise(options);
+      respond(res, res.bodyPath || null, res.debugTimeline);
     } catch (err) {
       console.log('[network] Error', err);
       await handleError(err);
