@@ -13,8 +13,6 @@ import {
 } from './commands/generate-config';
 import type { LintSpecificationOptions } from './commands/lint-specification';
 import { lintSpecification } from './commands/lint-specification';
-import type { RunTestsOptions } from './commands/run-tests';
-import { reporterTypes, runInsomniaTests, TestReporter } from './commands/run-tests';
 import { getOptions } from './get-options';
 import { configureLogger, logger } from './logger';
 import { UNKNOWN_OBJ } from './types';
@@ -57,34 +55,6 @@ const makeGenerateCommand = (commandCreator: CreateCommand) => {
       return exit(generateConfig(identifier, options));
     });
   return command;
-};
-
-const makeTestCommand = (commandCreator: CreateCommand) => {
-  // inso run
-  const run = commandCreator('run').description('Execution utilities');
-  const defaultReporter: TestReporter = 'spec';
-
-  // inso run tests
-  run
-    .command('test [identifier]')
-    .description('Run Insomnia unit test suites')
-    .option('-e, --env <identifier>', 'environment to use')
-    .option('-t, --testNamePattern <regex>', 'run tests that match the regex')
-    .option(
-      '-r, --reporter <reporter>',
-      `reporter to use, options are [${reporterTypes.join(', ')}] (default: ${defaultReporter})`,
-    )
-    .option('-b, --bail', 'abort ("bail") after first test failure')
-    .option('--keepFile', 'do not delete the generated test file')
-    .option('--disableCertValidation', 'disable certificate validation for requests with SSL')
-    .action((identifier, cmd) => {
-      let options = getOptions<RunTestsOptions>(cmd, {
-        reporter: defaultReporter,
-      });
-      options = prepareCommand(options);
-      return exit(runInsomniaTests(identifier, options));
-    });
-  return run;
 };
 
 const makeLintCommand = (commandCreator: CreateCommand) => {
@@ -196,7 +166,6 @@ export const go = (args?: string[], exitOverride?: boolean) => {
   // Add commands and sub commands
   cmd
     .addCommand(makeGenerateCommand(commandCreator))
-    .addCommand(makeTestCommand(commandCreator))
     .addCommand(makeLintCommand(commandCreator))
     .addCommand(makeExportCommand(commandCreator));
 

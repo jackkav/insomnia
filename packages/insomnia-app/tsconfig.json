@@ -8,7 +8,6 @@
     "**/insomnia.config.json",
     "package.json",
     "scripts",
-    "send-request",
     "webpack"
   ],
   "exclude": [

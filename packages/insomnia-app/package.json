@@ -27,14 +27,11 @@
     "start:dev-server": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack-dev-server --config webpack/webpack.config.development.ts",
     "start": "concurrently -n dev,app --kill-others \"npm run start:dev-server\" \"npm run start:electron\"",
     "prebuild": "npm run clean",
-    "build": "npm run build:sr && npm run build:app",
-    "build:app": "ts-node ./scripts/build.ts --noErrorTruncation",
-    "build:sr": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack --config webpack/webpack.config.sr.ts",
+    "build": "ts-node ./scripts/build.ts --noErrorTruncation",
     "package": "ts-node scripts/package.ts",
     "bump-version": "ts-node scripts/bumpVersion.ts",
     "lint": "eslint . --ext .js,.ts,.tsx --cache",
-    "lint:fix": "npm run lint -- --fix",
-    "bootstrap": "npm run build:sr"
+    "lint:fix": "npm run lint -- --fix"
   },
   "dev": {
     "dev-server-port": 3334

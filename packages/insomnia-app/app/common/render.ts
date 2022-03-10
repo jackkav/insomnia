@@ -394,7 +394,6 @@ export async function getRenderContext(
 
   baseContext.getEnvironmentId = () => environmentId;
 
-  // It is possible for a project to not exist because this code path can be reached via Inso/insomnia-send-request which has no concept of a project.
   baseContext.getProjectId = () => project?._id;
 
   // Generate the context we need to render
