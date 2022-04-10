@@ -11,17 +11,17 @@
   },
   "homepage": "https://github.com/kong/insomnia#readme",
   "scripts": {
-    "build": "lerna run build --parallel",
-    "lint": "lerna run lint --stream --no-bail",
+    "build": "npx nx run-many --target=build --all",
+    "lint": "npx nx run-many --target=lint --all",
     "lint:markdown": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\"",
-    "lint:fix": "lerna run lint:fix --stream --no-bail",
-    "bootstrap": "npm install && lerna bootstrap && lerna run --stream bootstrap",
+    "lint:fix": "npx nx run-many --target=lint:fix --all",
+    "bootstrap": "npm install && lerna bootstrap && npx nx run-many --target=bootstrap --all",
     "bootstrap:electron-builder": "lerna bootstrap --no-ci -- --production --no-optional",
     "version": "lerna version",
     "postversion": "lerna clean --yes && lerna bootstrap --no-ci --ignore-scripts -- --package-lock-only --no-audit",
     "publish": "lerna publish from-package",
-    "clean": "lerna run clean --parallel --stream && lerna clean --yes && rimraf node_modules",
-    "test": "lerna run --stream --parallel test",
+    "clean": "npx nx run-many --target=clean --all && lerna clean --yes && rimraf node_modules",
+    "test": "npx nx run-many --target=test --all",
     "inso-start": "npm start --prefix packages/insomnia-inso",
     "inso-package": "npm run build:sr --prefix packages/insomnia-app && npm run package --prefix packages/insomnia-inso",
     "inso-package:artifacts": "npm run artifacts --prefix packages/insomnia-inso",
@@ -36,7 +36,7 @@
     "test:smoke:package": "npm run test:package --prefix packages/insomnia-smoke-test",
     "test:smoke:cli": "npm run test:cli --prefix packages/insomnia-smoke-test",
     "hard-reset": "npm run clean && npm run bootstrap && npm run app-start",
-    "type-check": "lerna run type-check",
+    "type-check": "npx nx run-many --target=type-check --all",
     "changelog-image": "ts-node ./scripts/changelog-image/changelog-image.ts"
   },
   "devDependencies": {
@@ -80,7 +80,10 @@
     "ts-node": "^10.7.0",
     "tsimportlib": "^0.0.3",
     "type-fest": "^2.12.0",
-    "typescript": "^4.5.5"
+    "typescript": "^4.5.5",
+    "@nrwl/workspace": "13.10.1",
+    "@nrwl/cli": "13.10.1",
+    "nx": "13.10.1"
   },
   "dependencies": {
     "immer": "^9.0.6"
