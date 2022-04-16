@@ -10,7 +10,6 @@ import fs from 'fs';
 import https from 'https';
 import mkdirp from 'mkdirp';
 import path from 'path';
-import { ValueOf } from 'type-fest';
 import { parse as urlParse } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -58,7 +57,7 @@ interface SettingsUsedHere {
   noProxy: string;
 }
 interface ResponseTimelineEntry {
-  name: ValueOf<typeof LIBCURL_DEBUG_MIGRATION_MAP>;
+  name: TimelineColors;
   timestamp: number;
   value: string;
 }
@@ -71,7 +70,6 @@ interface CurlRequestOutput {
 }
 
 const getDataDirectory = () => process.env.INSOMNIA_DATA_PATH || electron.app.getPath('userData');
-
 // NOTE: this is a dictionary of functions to close open listeners
 const cancelCurlRequestHandlers = {};
 export const cancelCurlRequest = id => cancelCurlRequestHandlers[id]();
@@ -79,30 +77,45 @@ export const curlRequest = (options: CurlRequestOptions) => new Promise<CurlRequ
   const responsesDir = path.join(getDataDirectory(), 'responses');
   mkdirp.sync(responsesDir);
   const responseBodyPath = path.join(responsesDir, uuidv4() + '.response');
-  const responseBodyWriteStream = fs.createWriteStream(responseBodyPath);
+  const requestBodyPath = await parseRequestBodyPath(options.req.body);
+  const { method, body } = options.req;
+  const requestBody = parseRequestBody({ body, method });
+  let followRedirects = options.settings.followRedirects;
+  if (options.req.settingFollowRedirects === 'off') {
+    followRedirects = false;
+  }
+  if (options.req.settingFollowRedirects === 'on') {
+    followRedirects = true;
+  }
+  const { protocol } = urlParse(options.finalUrl);
+  const { httpProxy, httpsProxy } = options.settings;
+  const proxyHost = protocol === 'https:' ? httpsProxy : httpProxy;
+  const proxy = proxyHost ? setDefaultProtocol(proxyHost) : null;
+  const { req, finalUrl, authHeader } = options;
+  const headerStrings: string[] = parseHeaderStrings({ req, requestBody, requestBodyPath, finalUrl, authHeader });
+
+  return resolve(axiosAdapter({ ...options, requestBodyPath, requestBody, responseBodyPath, followRedirects, protocol, proxy, headerStrings }));
+});
+
+const axiosAdapter = options => new Promise<CurlRequestOutput>(resolve => {
   const debugTimeline: ResponseTimelineEntry[] = [];
 
   try {
-    const { requestId, req, finalUrl, settings, certificates, fullCAPath, socketPath, authHeader } = options;
-    if (socketPath) {
-      throw new Error('unix socket not supported');
-    }
-
+    const { requestId, req, requestBody, requestBodyPath, responseBodyPath, finalUrl, settings, certificates, fullCAPath, socketPath, authHeader, followRedirects, protocol, proxy, headerStrings } = options;
     const axiosOptions: AxiosRequestConfig = {
       url: finalUrl,
       method: req.method,
       headers: {},
+      socketPath,
     };
+
     if (!settings.proxyEnabled) {
       axiosOptions.proxy = false;
     } else {
-      const { protocol } = urlParse(req.url);
-      const { httpProxy, httpsProxy, noProxy } = settings;
-      if (noProxy) {
+      if (settings.noProxy) {
         debugTimeline.push({ value: 'no_proxy is not supported by axios', name: 'TEXT', timestamp: Date.now() });
       }
-      const proxyHost = protocol === 'https:' ? httpsProxy : httpProxy;
-      const proxy = proxyHost ? setDefaultProtocol(proxyHost) : null;
+
       debugTimeline.push({ value: `Enable network proxy for ${protocol || ''}`, name: 'TEXT', timestamp: Date.now() });
       if (proxy) {
         const { hostname, port } = new URL(proxy);
@@ -113,23 +126,19 @@ export const curlRequest = (options: CurlRequestOptions) => new Promise<CurlRequ
       }
     }
 
-    const { validateSSL, maxRedirects } = settings;
-    // // NOTE: disable follow redirects https://github.com/axios/axios/pull/307/files#diff-586c04c24
-    if (req.settingFollowRedirects === 'off') {
-      axiosOptions.maxRedirects = 0;
-    } else if (req.settingFollowRedirects === 'on') {
-      axiosOptions.maxRedirects = maxRedirects;
-    } else if (settings.followRedirects) {
-      axiosOptions.maxRedirects = maxRedirects;
-    } else {
-      axiosOptions.maxRedirects = 0;
-    }
-
     const httpVersion = getHttpVersion(settings.preferredHttpVersion);
     debugTimeline.push({ value: httpVersion.log, name: 'TEXT', timestamp: Date.now() });
 
     if (httpVersion.curlHttpVersion) {
       debugTimeline.push({ value: 'HTTP version change not supported by axios', name: 'TEXT', timestamp: Date.now() });
+    }
+
+    const { validateSSL, maxRedirects } = settings;
+    // // NOTE: disable follow redirects https://github.com/axios/axios/pull/307/files#diff-586c04c24
+    if (followRedirects) {
+      axiosOptions.maxRedirects = maxRedirects;
+    } else {
+      axiosOptions.maxRedirects = 0;
     }
 
     const agentConfig: https.AgentOptions = {
@@ -169,13 +178,10 @@ export const curlRequest = (options: CurlRequestOptions) => new Promise<CurlRequ
       debugTimeline.push({ value: 'rebuild path is unsupported by axios', name: 'TEXT', timestamp: Date.now() });
     }
 
-    const { method, body } = req;
-    const requestBody = parseRequestBody({ body, method });
     if (requestBody) {
       axiosOptions.data = requestBody;
     }
-    const requestBodyPath = await parseRequestBodyPath(body);
-    const isMultipart = body.mimeType === CONTENT_TYPE_FORM_DATA && requestBodyPath;
+    const isMultipart = req.body.mimeType === CONTENT_TYPE_FORM_DATA && requestBodyPath;
     let requestFileDescriptor;
     const { authentication } = req;
     if (requestBodyPath) {
@@ -189,7 +195,6 @@ export const curlRequest = (options: CurlRequestOptions) => new Promise<CurlRequ
       axiosOptions.maxBodyLength = 100 * 1024 * 1024; // 100 MB or Infinity? what do we intend to support? :shrug:
     }
 
-    const headerStrings: string[] = parseHeaderStrings({ req, requestBody, requestBodyPath, finalUrl, authHeader });
     headerStrings.map(header => {
       if (header.includes(';')) {
         debugTimeline.push({ value: 'empty headers are not supported by axios?', name: 'TEXT', timestamp: Date.now() });
@@ -290,46 +295,8 @@ ${rest}`;
 
         });
       }).catch(e => {
-        responseBodyWriteStream.end();
-        if (requestFileDescriptor) {
-          closeReadFunction(requestFileDescriptor, isMultipart, requestBodyPath);
-        }
-        console.error(e);
-        const patch = {
-          statusMessage: 'Error',
-          error: e.message || 'Something went wrong',
-          elapsedTime: 0,
-        };
-        resolve({ patch, debugTimeline, headerResults: [{ version: '', code: 0, reason: '', headers: [] }] });
+        throw e;
       });
-
-    // set up response logger
-    // curl.setOpt(Curl.option.DEBUGFUNCTION, (infoType, buffer) => {
-    //   const isSSLData = infoType === CurlInfoDebug.SslDataIn || infoType === CurlInfoDebug.SslDataOut;
-    //   const isEmpty = buffer.length === 0;
-    //   // Don't show cookie setting because this will display every domain in the jar
-    //   const isAddCookie = infoType === CurlInfoDebug.Text && buffer.toString('utf8').indexOf('Added cookie') === 0;
-    //   if (isSSLData || isEmpty || isAddCookie) {
-    //     return 0;
-    //   }
-
-    //   let timelineMessage;
-    //   if (infoType === CurlInfoDebug.DataOut) {
-    //     // Ignore large post data messages
-    //     const isLessThan10KB = buffer.length / 1024 < (settings.maxTimelineDataSizeKB || 1);
-    //     timelineMessage = isLessThan10KB ? buffer.toString('utf8') : `(${describeByteSize(buffer.length)} hidden)`;
-    //   }
-    //   if (infoType === CurlInfoDebug.DataIn) {
-    //     timelineMessage = `Received ${describeByteSize(buffer.length)} chunk`;
-    //   }
-
-    //   debugTimeline.push({
-    //     name: infoType === CurlInfoDebug.DataIn ? 'TEXT' : LIBCURL_DEBUG_MIGRATION_MAP[CurlInfoDebug[infoType]],
-    //     value: timelineMessage || buffer.toString('utf8'),
-    //     timestamp: Date.now(),
-    //   });
-    //   return 0;
-    // });
   } catch (e) {
     console.error(e);
     const patch = {
@@ -351,16 +318,7 @@ const closeReadFunction = (fd: number, isMultipart: boolean, path?: string) => {
 };
 
 // Because node-libcurl changed some names that we used in the timeline
-const LIBCURL_DEBUG_MIGRATION_MAP = {
-  HeaderIn: 'HEADER_IN',
-  DataIn: 'DATA_IN',
-  SslDataIn: 'SSL_DATA_IN',
-  HeaderOut: 'HEADER_OUT',
-  DataOut: 'DATA_OUT',
-  SslDataOut: 'SSL_DATA_OUT',
-  Text: 'TEXT',
-  '': '',
-};
+type TimelineColors = 'HEADER_IN' | 'DATA_IN' | 'SSL_DATA_IN' | 'HEADER_OUT' | 'DATA_OUT' | 'SSL_DATA_OUT' | 'TEXT';
 
 interface HeaderResult {
   headers: ResponseHeader[];
@@ -406,22 +364,22 @@ const parseRequestBodyPath = async body => {
   if (!isMultipartForm) {
     return body.fileName;
   }
-  const { filePath } = await buildMultipart(body.params || [],);
+  const { filePath } = await buildMultipart(body.params || []);
   return filePath;
 };
 
 export const getHttpVersion = preferredHttpVersion => {
   switch (preferredHttpVersion) {
     case 'V1_0':
-      return { log: 'Using HTTP 1.0', curlHttpVersion: 'V1_0' };
+      return { log: 'Using HTTP 1.0', curlHttpVersion: preferredHttpVersion };
     case 'V1_1':
-      return { log: 'Using HTTP 1.1', curlHttpVersion: 'V1_1' };
+      return { log: 'Using HTTP 1.1', curlHttpVersion: preferredHttpVersion };
     case 'V2PriorKnowledge':
-      return { log: 'Using HTTP/2 PriorKnowledge', curlHttpVersion: 'V2PriorKnowledge' };
+      return { log: 'Using HTTP/2 PriorKnowledge', curlHttpVersion: preferredHttpVersion };
     case 'V2_0':
-      return { log: 'Using HTTP/2', curlHttpVersion: 'V2_0' };
+      return { log: 'Using HTTP/2', curlHttpVersion: preferredHttpVersion };
     case 'v3':
-      return { log: 'Using HTTP/3', curlHttpVersion: 'v3' };
+      return { log: 'Using HTTP/3', curlHttpVersion: preferredHttpVersion };
     case 'default':
       return { log: 'Using default HTTP version' };
     default:
