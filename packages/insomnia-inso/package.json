@@ -57,7 +57,7 @@
     "rimraf": "^3.0.2",
     "ts-loader": "^8.2.0",
     "ts-node": "^9.1.1",
-    "webpack": "5.72.0",
+    "webpack": "4.44.1",
     "webpack-cli": "^3.3.12",
     "webpack-merge": "^5.0.7",
     "webpack-node-externals": "^1.7.2"
