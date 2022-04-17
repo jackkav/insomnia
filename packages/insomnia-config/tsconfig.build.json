@@ -5,7 +5,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "resolveJsonModule": true,
-    "strict": true,
+    "strict": true
   },
   "include": [
     "src",
@@ -15,5 +15,6 @@
   "exclude": [
     "dist",
     "**/*.test.ts",
+    "**/@types/mocha",
   ],
 }

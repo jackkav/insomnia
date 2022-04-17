@@ -42,6 +42,7 @@ This repository is structured as a monorepo and contains many Node.JS packages. 
 
 ```shell
 # Install and Link Dependencies
+npm install
 npm run bootstrap
 
 # Run Tests

@@ -28,7 +28,9 @@ const runInternal = async <TReturn, TNetworkResponse>(
 
   // Add global `insomnia` helper.
   // This is the only way to add new globals to the Mocha environment as far as I can tell
+  // @ts-expect-error something
   global.insomnia = new Insomnia(options);
+  // @ts-expect-error something
   global.chai = chai;
 
   const mocha: Mocha = new Mocha({
@@ -51,7 +53,9 @@ const runInternal = async <TReturn, TNetworkResponse>(
       resolve(extractResult(runner));
 
       // Remove global since we don't need it anymore
+      // @ts-expect-error something
       delete global.insomnia;
+      // @ts-expect-error something
       delete global.chai;
 
       if (keepFile && mocha.files.length) {

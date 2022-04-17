@@ -15,12 +15,9 @@ module.exports = {
   module: {
     rules: [
       {
-        test: /\.tsx?$/,
-        loader: 'ts-loader',
-        exclude: [/node_modules/],
-        options: {
-          configFile: 'tsconfig.build.json',
-        },
+        test: /\.tsx?$|\.jsx?$/,
+        loader: 'babel-loader',
+        exclude: /node_modules/,
       },
     ],
   },
@@ -30,6 +27,8 @@ module.exports = {
   externals: [
     '@getinsomnia/node-libcurl',
     'mocha',
+    '@stoplight/spectral',
+    '@hapi/teamwork',
     nodeExternals(),
   ],
 };
