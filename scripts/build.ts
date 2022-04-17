@@ -113,7 +113,7 @@ const buildLicenseList = (relSource: string, relDest: string) =>
 
 const install = () =>
   new Promise<void>((resolve, reject) => {
-    const root = path.resolve(__dirname, '../../../');
+    const root = path.resolve(__dirname, '../');
 
     const p = childProcess.spawn('npm', ['run', 'bootstrap:electron-builder'], {
       cwd: root,

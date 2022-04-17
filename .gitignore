@@ -33,3 +33,5 @@ dist
 .history
 packages/insomnia-app/app/network/ca_certs.ts
 packages/insomnia-app/app/main.min.js.map
+build
+main.min.js
