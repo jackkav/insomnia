@@ -996,3 +996,35 @@ describe('_parseHeaders', () => {
     ]);
   });
 });
+
+describe('getSetCookiesFromResponseHeaders', () => {
+  it('defaults to empty array', () => {
+    const headers = [];
+    expect(networkUtils.getSetCookiesFromResponseHeaders(headers)).toEqual([]);
+  });
+  it('gets set-cookies', () => {
+    const headers = [{ name: 'Set-Cookie', value: 'monster' }];
+    expect(networkUtils.getSetCookiesFromResponseHeaders(headers)).toEqual(['monster']);
+  });
+  it('gets two case-insenstive set-cookies', () => {
+    const headers = [{ name: 'Set-Cookie', value: 'monster' }, { name: 'set-cookie', value: 'mash' }];
+    expect(networkUtils.getSetCookiesFromResponseHeaders(headers)).toEqual(['monster', 'mash']);
+  });
+});
+describe('getCurrentUrl for tough-cookie', () => {
+  it('defaults to finalUrl', () => {
+    const headerResults = [];
+    const finalUrl = 'http://insomnia.rest';
+    expect(networkUtils.getCurrentUrl({ headerResults, finalUrl })).toEqual(finalUrl);
+  });
+  it('append location to finalUrl', () => {
+    const headerResults = [{ headers: [{ name: 'Location', value: '/cookies' }] }];
+    const finalUrl = 'http://insomnia.rest';
+    expect(networkUtils.getCurrentUrl({ headerResults, finalUrl })).toEqual(finalUrl + '/cookies');
+  });
+  it('appends only last location to finalUrl', () => {
+    const headerResults = [{ headers: [{ name: 'Location', value: '/cookies' }] }, { headers: [{ name: 'location', value: '/biscuit' }] }, { headers: [{}] }];
+    const finalUrl = 'http://insomnia.rest';
+    expect(networkUtils.getCurrentUrl({ headerResults, finalUrl })).toEqual(finalUrl + '/biscuit');
+  });
+});

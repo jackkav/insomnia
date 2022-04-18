@@ -519,22 +519,35 @@ export async function _actuallySend(
       };
       const { patch, debugTimeline, headerResults } = await nodejsCurlRequest(requestOptions);
       const { cookieJar, settingStoreCookies } = renderedRequest;
-      const { lastRedirect, contentType, headerTimeline } = await setCookiesFromResponseHeaders({
-        headerResults,
-        finalUrl,
-        cookieJar,
-        settingStoreCookies,
-      });
+      // add set-cookie headers to file(cookiejar) and database
+      if (settingStoreCookies) {
+        // supports many set-cookies over many redirects
+        const redirects: string[][] = headerResults.map(getSetCookiesFromResponseHeaders);
+        const setCookieStrings: string[] = redirects.flat();
+        const totalSetCookies = setCookieStrings.length;
+        if (totalSetCookies) {
+          const currentUrl = getCurrentUrl({ headerResults, finalUrl });
+          const { cookies, rejectedCookies } = await addSetCookiesToToughCookieJar({ setCookieStrings, currentUrl, cookieJar });
+          rejectedCookies.forEach(errorMessage => timeline.push({ value: `Rejected cookie: ${errorMessage}`, name: 'TEXT', timestamp: Date.now() }));
+          const hasCookiesToPersist = totalSetCookies > rejectedCookies.length;
+          if (hasCookiesToPersist) {
+            await models.cookieJar.update(cookieJar, { cookies });
+            timeline.push({ value: `Saved ${totalSetCookies} cookies`, name: 'TEXT', timestamp: Date.now() });
+          }
+        }
+      }
+
+      const lastRedirect = headerResults[headerResults.length - 1];
 
       const responsePatch: ResponsePatch = {
-        contentType,
+        contentType: getContentTypeHeader(lastRedirect.headers)?.value || '',
         headers: lastRedirect.headers,
         httpVersion: lastRedirect.version,
         statusCode: lastRedirect.code,
         statusMessage: lastRedirect.reason,
         ...patch,
       };
-      const timelinePath = await storeTimeline([...timeline, ...debugTimeline, ...headerTimeline]);
+      const timelinePath = await storeTimeline([...timeline, ...debugTimeline]);
       // Tear Down the cancellation logic
       if (cancelRequestFunctionMap.hasOwnProperty(renderedRequest._id)) {
         delete cancelRequestFunctionMap[renderedRequest._id];
@@ -561,6 +574,41 @@ export async function _actuallySend(
     }
   });
 }
+export const getSetCookiesFromResponseHeaders = headers => getSetCookieHeaders(headers).map(h => h.value);
+
+export const getCurrentUrl = ({ headerResults, finalUrl }) => {
+  if (!headerResults || !headerResults.length) {
+    return finalUrl;
+  }
+  let location;
+  headerResults.filter(r => getLocationHeader(r.headers)?.value).forEach(r => {
+    location = getLocationHeader(r.headers)?.value;
+  });
+  if (!location) {
+    return finalUrl;
+  }
+  try {
+    return new URL(location, finalUrl).toString();
+  } catch (error) {
+    return finalUrl;
+  }
+};
+
+const addSetCookiesToToughCookieJar = async ({ setCookieStrings, currentUrl, cookieJar }) => {
+  const rejectedCookies: string[] = [];
+  const jar = jarFromCookies(cookieJar.cookies);
+  for (const setCookieStr of setCookieStrings) {
+    try {
+      jar.setCookieSync(setCookieStr, currentUrl);
+    } catch (err) {
+      if (err instanceof Error) {
+        rejectedCookies.push(err.message);
+      }
+    }
+  }
+  const cookies = await cookiesFromJar(jar);
+  return { cookies, rejectedCookies };
+};
 
 const parseRequestBody = req => {
   const isUrlEncodedForm = req.body.mimeType === CONTENT_TYPE_FORM_URLENCODED;
@@ -583,56 +631,6 @@ const parseRequestBodyPath = async req => {
     return filePath;
   }
   return req.body.fileName;
-};
-
-// add set-cookie headers to file(cookiejar) and database
-const setCookiesFromResponseHeaders = async ({ headerResults, finalUrl, cookieJar, settingStoreCookies }) => {
-  const headerTimeline: ResponseTimelineEntry[] = [];
-
-  // Update Cookie Jar
-  const setCookieStrings: string[] = headerResults.map(({ headers }) => getSetCookieHeaders(headers).map(s => s.value)).flat().filter(s => s.length);
-
-  // Update jar with Set-Cookie headers
-  const jar = jarFromCookies(cookieJar.cookies);
-  for (const setCookie of setCookieStrings) {
-    try {
-      // get the last location header to set the cookie at
-      const locationHeader = headerResults.reverse().find(({ headers }) => getLocationHeader(headers));
-      jar.setCookieSync(setCookie, locationHeader?.value || finalUrl);
-    } catch (err) {
-      headerTimeline.push({
-        name: 'TEXT',
-        value: `Rejected cookie: ${err.message}`,
-        timestamp: Date.now(),
-      });
-    }
-  }
-
-  // Update cookie jar if we need to and if we found any cookies
-  if (settingStoreCookies && setCookieStrings.length) {
-    const cookies = await cookiesFromJar(jar);
-    await models.cookieJar.update(cookieJar, { cookies });
-  }
-
-  // Print informational message
-  if (setCookieStrings.length > 0) {
-    const n = setCookieStrings.length;
-    const intent = settingStoreCookies ? 'Saved' : 'Ignored';
-    const plural = `cookie${n === 1 ? '' : 's'}`;
-    headerTimeline.push({
-      name: 'TEXT',
-      value: `${intent} ${n} ${plural}`,
-      timestamp: Date.now(),
-    });
-  }
-  // Headers are an array (one for each redirect)
-  const lastRedirect = headerResults[headerResults.length - 1];
-  return {
-    lastRedirect,
-    contentType: getContentTypeHeader(lastRedirect.headers)?.value || '',
-    headerTimeline,
-  };
-
 };
 
 const parseHeaderStrings = async ({ renderedRequest, requestBody, requestBodyPath, finalUrl }) => {
