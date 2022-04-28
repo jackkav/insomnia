@@ -353,15 +353,18 @@ export const database = {
     }
 
     delete db._empty;
-    electron.ipcMain.on('db.fn', async (e, fnName, replyChannel, ...args) => {
+
+    electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
       try {
-        const result = await database[fnName](...args);
-        e.sender.send(replyChannel, null, result);
+        console.log('handled ', fnName);
+
+        return await database[fnName](...args);
       } catch (err) {
-        e.sender.send(replyChannel, {
+        console.error('something went wrong');
+        return {
           message: err.message,
           stack: err.stack,
-        });
+        };
       }
     });
 
@@ -726,18 +729,9 @@ type Patch<T> = Partial<T>;
 // ~~~~~~~ //
 // Helpers //
 // ~~~~~~~ //
-async function _send<T>(fnName: string, ...args: any[]) {
-  return new Promise<T>((resolve, reject) => {
-    const replyChannel = `db.fn.reply:${uuidv4()}`;
-    electron.ipcRenderer.send('db.fn', fnName, replyChannel, ...args);
-    electron.ipcRenderer.once(replyChannel, (_e, err, result: T) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(result);
-      }
-    });
-  });
+
+async function _send(fnName: string, ...args: any[]) {
+  return electron.ipcRenderer.invoke('db.fn', fnName, ...args);
 }
 
 /**
