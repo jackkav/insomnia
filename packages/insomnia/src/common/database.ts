@@ -2,7 +2,6 @@
 import electron from 'electron';
 import NeDB from 'nedb';
 import fsPath from 'path';
-import { v4 as uuidv4 } from 'uuid';
 
 import { mustGetModel } from '../models';
 import { CookieJar } from '../models/cookie-jar';
@@ -44,15 +43,15 @@ export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQu
 
 export const database = {
   all: async function<T extends BaseModel>(type: string) {
-    if (db._empty) {
-      return _send<T[]>('all', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'all', ...arguments);
     }
     return database.find<T>(type);
   },
 
   batchModifyDocs: async function({ upsert = [], remove = [] }: Operation) {
-    if (db._empty) {
-      return _send<void>('batchModifyDocs', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'batchModifyDocs', ...arguments);
     }
     const flushId = await database.bufferChanges();
 
@@ -65,8 +64,8 @@ export const database = {
 
   /** buffers database changes and returns a buffer id */
   bufferChanges: async function(millis = 1000) {
-    if (db._empty) {
-      return _send<number>('bufferChanges', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'bufferChanges', ...arguments);
     }
     bufferingChanges = true;
     setTimeout(database.flushChanges, millis);
@@ -75,8 +74,8 @@ export const database = {
 
   /** buffers database changes and returns a buffer id */
   bufferChangesIndefinitely: async function() {
-    if (db._empty) {
-      return _send<number>('bufferChangesIndefinitely', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'bufferChangesIndefinitely', ...arguments);
     }
     bufferingChanges = true;
     return ++bufferChangesId;
@@ -89,8 +88,8 @@ export const database = {
   CHANGE_REMOVE: 'remove',
 
   count: async function<T extends BaseModel>(type: string, query: Query = {}) {
-    if (db._empty) {
-      return _send<number>('count', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'count', ...arguments);
     }
     return new Promise<number>((resolve, reject) => {
       (db[type] as NeDB<T>).count(query, (err, count) => {
@@ -131,8 +130,8 @@ export const database = {
   },
 
   duplicate: async function<T extends BaseModel>(originalDoc: T, patch: Patch<T> = {}) {
-    if (db._empty) {
-      return _send<T>('duplicate', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'duplicate', ...arguments);
     }
     const flushId = await database.bufferChanges();
 
@@ -179,8 +178,8 @@ export const database = {
     query: Query | string = {},
     sort: Sort = { created: 1 },
   ) {
-    if (db._empty) {
-      return _send<T[]>('find', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'find', ...arguments);
     }
     return new Promise<T[]>((resolve, reject) => {
       (db[type] as NeDB<T>)
@@ -208,8 +207,8 @@ export const database = {
     query: Query = {},
     limit: number | null = null,
   ) {
-    if (db._empty) {
-      return _send<T[]>('findMostRecentlyModified', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'findMostRecentlyModified', ...arguments);
     }
     return new Promise<T[]>(resolve => {
       (db[type] as NeDB<T>)
@@ -238,8 +237,8 @@ export const database = {
   },
 
   flushChanges: async function(id = 0, fake = false) {
-    if (db._empty) {
-      return _send<void>('flushChanges', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'flushChanges', ...arguments);
     }
 
     // Only flush if ID is 0 or the current flush ID is the same as passed
@@ -283,8 +282,8 @@ export const database = {
   },
 
   get: async function<T extends BaseModel>(type: string, id?: string) {
-    if (db._empty) {
-      return _send<T>('get', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'get', ...arguments);
     }
 
     // Short circuit IDs used to represent nothing
@@ -296,16 +295,16 @@ export const database = {
   },
 
   getMostRecentlyModified: async function<T extends BaseModel>(type: string, query: Query = {}) {
-    if (db._empty) {
-      return _send<T>('getMostRecentlyModified', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'getMostRecentlyModified', ...arguments);
     }
     const docs = await database.findMostRecentlyModified<T>(type, query, 1);
     return docs.length ? docs[0] : null;
   },
 
   getWhere: async function<T extends BaseModel>(type: string, query: ModelQuery<T> | Query) {
-    if (db._empty) {
-      return _send<T>('getWhere', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'getWhere', ...arguments);
     }
     // @ts-expect-error -- TSCONVERSION type narrowing needed
     const docs = await database.find<T>(type, query);
@@ -351,8 +350,6 @@ export const database = {
       collection.persistence.setAutocompactionInterval(DB_PERSIST_INTERVAL);
       db[modelType] = collection;
     }
-
-    delete db._empty;
 
     electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
       try {
@@ -432,8 +429,8 @@ export const database = {
   },
 
   insert: async function<T extends BaseModel>(doc: T, fromSync = false, initializeModel = true) {
-    if (db._empty) {
-      return _send<T>('insert', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'insert', ...arguments);
     }
     return new Promise<T>(async (resolve, reject) => {
       let docWithDefaults: T | null = null;
@@ -469,8 +466,8 @@ export const database = {
   },
 
   remove: async function<T extends BaseModel>(doc: T, fromSync = false) {
-    if (db._empty) {
-      return _send<void>('remove', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'remove', ...arguments);
     }
 
     const flushId = await database.bufferChanges();
@@ -498,8 +495,8 @@ export const database = {
   },
 
   removeWhere: async function<T extends BaseModel>(type: string, query: Query) {
-    if (db._empty) {
-      return _send<void>('removeWhere', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'removeWhere', ...arguments);
     }
     const flushId = await database.bufferChanges();
 
@@ -529,8 +526,8 @@ export const database = {
 
   /** Removes entries without removing their children */
   unsafeRemove: async function<T extends BaseModel>(doc: T, fromSync = false) {
-    if (db._empty) {
-      return _send<void>('unsafeRemove', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'unsafeRemove', ...arguments);
     }
 
     (db[doc.type] as NeDB<T>).remove({ _id: doc._id });
@@ -538,8 +535,8 @@ export const database = {
   },
 
   update: async function<T extends BaseModel>(doc: T, fromSync = false) {
-    if (db._empty) {
-      return _send<T>('update', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'update', ...arguments);
     }
 
     return new Promise<T>(async (resolve, reject) => {
@@ -571,8 +568,8 @@ export const database = {
 
   // TODO(TSCONVERSION) the update method above can now take an upsert property
   upsert: async function<T extends BaseModel>(doc: T, fromSync = false) {
-    if (db._empty) {
-      return _send<T>('upsert', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'upsert', ...arguments);
     }
     const existingDoc = await database.get<T>(doc.type, doc._id);
 
@@ -584,8 +581,8 @@ export const database = {
   },
 
   withAncestors: async function<T extends BaseModel>(doc: T | null, types: string[] = allTypes()) {
-    if (db._empty) {
-      return _send<T[]>('withAncestors', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'withAncestors', ...arguments);
     }
 
     if (!doc) {
@@ -622,8 +619,8 @@ export const database = {
   },
 
   withDescendants: async function<T extends BaseModel>(doc: T | null, stopType: string | null = null): Promise<BaseModel[]> {
-    if (db._empty) {
-      return _send<BaseModel[]>('withDescendants', ...arguments);
+    if (process.type === 'renderer') {
+      return electron.ipcRenderer.invoke('db.fn', 'withDescendants', ...arguments);
     }
     let docsToReturn: BaseModel[] = doc ? [doc] : [];
 
@@ -725,14 +722,6 @@ async function notifyOfChange<T extends BaseModel>(event: string, doc: T, fromSy
 // ~~~~~~~~~~~~~~~~~~~ //
 
 type Patch<T> = Partial<T>;
-
-// ~~~~~~~ //
-// Helpers //
-// ~~~~~~~ //
-
-async function _send(fnName: string, ...args: any[]) {
-  return electron.ipcRenderer.invoke('db.fn', fnName, ...args);
-}
 
 /**
  * Run various database repair scripts
