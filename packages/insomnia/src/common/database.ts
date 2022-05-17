@@ -42,6 +42,10 @@ export interface SpecificQuery {
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 
 const ipcdatabase = {
+  // required for redux reducer state changes
+  CHANGE_INSERT: 'insert',
+  CHANGE_UPDATE: 'update',
+  CHANGE_REMOVE: 'remove',
   all: function(type: string) {
     return electron.ipcRenderer.invoke('db.fn', 'all', type);
   },
@@ -470,7 +474,7 @@ const olddatabase = {
 
     // This isn't the best place for this but w/e
     // Listen for response deletions and delete corresponding response body files
-    olddatabase.onChange(async changes => {
+    ipcdatabase.onChange(async changes => {
       for (const [type, doc] of changes) {
         // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
         // The type definition will be a little confusing
@@ -480,7 +484,7 @@ const olddatabase = {
           continue;
         }
 
-        if (type === olddatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
+        if (type === ipcdatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
           try {
             await m.hookRemove(doc, consoleLog);
           } catch (err) {
@@ -488,7 +492,7 @@ const olddatabase = {
           }
         }
 
-        if (type === olddatabase.CHANGE_INSERT && typeof m.hookInsert === 'function') {
+        if (type === ipcdatabase.CHANGE_INSERT && typeof m.hookInsert === 'function') {
           try {
             await m.hookInsert(doc, consoleLog);
           } catch (err) {
@@ -496,7 +500,7 @@ const olddatabase = {
           }
         }
 
-        if (type === olddatabase.CHANGE_UPDATE && typeof m.hookUpdate === 'function') {
+        if (type === ipcdatabase.CHANGE_UPDATE && typeof m.hookUpdate === 'function') {
           try {
             await m.hookUpdate(doc, consoleLog);
           } catch (err) {
