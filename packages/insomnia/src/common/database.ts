@@ -43,7 +43,7 @@ export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQu
 
 // ipcdatabase={
 //   all:type => electron.ipcRenderer.invoke('db.fn', 'all', type),
-//   dbFn: (method, options) => electron.ipcRenderer.invoke('db.fn', 'all', type),
+//   dbFn: (method, options) => electron.ipcRenderer.invoke('db.fn', method, type),
 // }
 
 const ipcdatabase = {
@@ -142,52 +142,13 @@ const ipcdatabase = {
 
 type ChangeListener = Function;
 
-let changeListeners: ChangeListener[] = [async changes => {
-  for (const [type, doc] of changes) {
-    // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
-    // The type definition will be a little confusing
-    const m: Record<string, any> | null = models.getModel(doc.type);
-
-    if (!m) {
-      continue;
-    }
-
-    if (type === ipcdatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
-      try {
-        await m.hookRemove(doc, console.log);
-      } catch (err) {
-        console.log(`[db] Delete hook failed for ${type} ${doc._id}: ${err.message}`);
-      }
-    }
-
-    if (type === ipcdatabase.CHANGE_INSERT && typeof m.hookInsert === 'function') {
-      try {
-        await m.hookInsert(doc, console.log);
-      } catch (err) {
-        console.log(`[db] Insert hook failed for ${type} ${doc._id}: ${err.message}`);
-      }
-    }
-
-    if (type === ipcdatabase.CHANGE_UPDATE && typeof m.hookUpdate === 'function') {
-      try {
-        await m.hookUpdate(doc, console.log);
-      } catch (err) {
-        console.log(`[db] Update hook failed for ${type} ${doc._id}: ${err.message}`);
-      }
-    }
-  }
-}];
-
 const olddatabase = {
   all: async function <T extends BaseModel>(type: string) {
-
     return olddatabase.find<T>(type);
   },
 
   batchModifyDocs: async function({ upsert = [], remove = [] }: Operation) {
-
     const flushId = await olddatabase.bufferChanges();
-
     // Perform from least to most dangerous
     await Promise.all(upsert.map(doc => olddatabase.upsert(doc, true)));
     await Promise.all(remove.map(doc => olddatabase.unsafeRemove(doc, true)));
@@ -197,7 +158,6 @@ const olddatabase = {
 
   /** buffers database changes and returns a buffer id */
   bufferChanges: async function(millis = 1000) {
-
     bufferingChanges = true;
     setTimeout(olddatabase.flushChanges, millis);
     return ++bufferChangesId;
@@ -205,7 +165,6 @@ const olddatabase = {
 
   /** buffers database changes and returns a buffer id */
   bufferChangesIndefinitely: async function() {
-
     bufferingChanges = true;
     return ++bufferChangesId;
   },
@@ -217,7 +176,6 @@ const olddatabase = {
   CHANGE_REMOVE: 'remove',
 
   count: async function <T extends BaseModel>(type: string, query: Query = {}) {
-
     return new Promise<number>((resolve, reject) => {
       (db[type] as NeDB<T>).count(query, (err, count) => {
         if (err) {
@@ -257,9 +215,7 @@ const olddatabase = {
   },
 
   duplicate: async function <T extends BaseModel>(originalDoc: T, patch: Patch<T> = {}) {
-
     const flushId = await olddatabase.bufferChanges();
-
     async function next<T extends BaseModel>(docToCopy: T, patch: Patch<T>) {
       const model = mustGetModel(docToCopy.type);
       const overrides = {
@@ -303,7 +259,6 @@ const olddatabase = {
     query: Query | string = {},
     sort: Sort = { created: 1 },
   ) {
-
     return new Promise<T[]>((resolve, reject) => {
       (db[type] as NeDB<T>)
         .find(query)
@@ -330,7 +285,6 @@ const olddatabase = {
     query: Query = {},
     limit: number | null = null,
   ) {
-
     return new Promise<T[]>(resolve => {
       (db[type] as NeDB<T>)
         .find(query)
@@ -358,7 +312,6 @@ const olddatabase = {
   },
 
   flushChanges: async function(id = 0, fake = false) {
-
     // Only flush if ID is 0 or the current flush ID is the same as passed
     if (id !== 0 && bufferChangesId !== id) {
       return;
@@ -379,6 +332,24 @@ const olddatabase = {
     }
     console.log('do we ever need to listen for changes in main?', changeListeners, changes, process.type);
 
+    // NOTE: this is exclusively for deleting response and timeline files and could be moved somewhere more appropriate
+    for (const [type, doc] of changes) {
+      // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
+      // The type definition will be a little confusing
+      const m: Record<string, any> | null = models.getModel(doc.type);
+
+      if (!m) {
+        continue;
+      }
+
+      if (type === olddatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
+        try {
+          await m.hookRemove(doc, console.log);
+        } catch (err) {
+          console.log(`[db] Delete hook failed for ${type} ${doc._id}: ${err.message}`);
+        }
+      }
+    }
     // Notify remote listeners
     const isMainContext = process.type === 'browser';
     if (isMainContext) {
@@ -397,7 +368,6 @@ const olddatabase = {
   },
 
   get: async function <T extends BaseModel>(type: string, id?: string) {
-
     // Short circuit IDs used to represent nothing
     if (!id || id === 'n/a') {
       return null;
@@ -407,13 +377,11 @@ const olddatabase = {
   },
 
   getMostRecentlyModified: async function <T extends BaseModel>(type: string, query: Query = {}) {
-
     const docs = await olddatabase.findMostRecentlyModified<T>(type, query, 1);
     return docs.length ? docs[0] : null;
   },
 
   getWhere: async function <T extends BaseModel>(type: string, query: ModelQuery<T> | Query) {
-
     // @ts-expect-error -- TSCONVERSION type narrowing needed
     const docs = await olddatabase.find<T>(type, query);
     return docs.length ? docs[0] : null;
@@ -449,7 +417,6 @@ const olddatabase = {
     electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
       try {
         console.log('handled ', fnName, ...args);
-
         return await olddatabase[fnName](...args);
       } catch (err) {
         console.error('something went wrong');
@@ -477,7 +444,6 @@ const olddatabase = {
   },
 
   insert: async function <T extends BaseModel>(doc: T, fromSync = false, initializeModel = true) {
-
     return new Promise<T>(async (resolve, reject) => {
       let docWithDefaults: T | null = null;
 
@@ -503,16 +469,7 @@ const olddatabase = {
     });
   },
 
-  onChange: (callback: ChangeListener) => {
-    changeListeners.push(callback);
-  },
-
-  offChange: (callback: ChangeListener) => {
-    changeListeners = changeListeners.filter(l => l !== callback);
-  },
-
   remove: async function <T extends BaseModel>(doc: T, fromSync = false) {
-
     const flushId = await olddatabase.bufferChanges();
 
     const docs = await olddatabase.withDescendants(doc);
@@ -538,7 +495,6 @@ const olddatabase = {
   },
 
   removeWhere: async function <T extends BaseModel>(type: string, query: Query) {
-
     const flushId = await olddatabase.bufferChanges();
 
     for (const doc of await olddatabase.find<T>(type, query)) {
@@ -567,13 +523,11 @@ const olddatabase = {
 
   /** Removes entries without removing their children */
   unsafeRemove: async function <T extends BaseModel>(doc: T, fromSync = false) {
-
     (db[doc.type] as NeDB<T>).remove({ _id: doc._id });
     notifyOfChange(olddatabase.CHANGE_REMOVE, doc, fromSync);
   },
 
   update: async function <T extends BaseModel>(doc: T, fromSync = false) {
-
     return new Promise<T>(async (resolve, reject) => {
       let docWithDefaults: T;
 
@@ -603,9 +557,7 @@ const olddatabase = {
 
   // TODO(TSCONVERSION) the update method above can now take an upsert property
   upsert: async function <T extends BaseModel>(doc: T, fromSync = false) {
-
     const existingDoc = await olddatabase.get<T>(doc.type, doc._id);
-
     if (existingDoc) {
       return olddatabase.update<T>(doc, fromSync);
     } else {
@@ -614,7 +566,6 @@ const olddatabase = {
   },
 
   withAncestors: async function <T extends BaseModel>(doc: T | null, types: string[] = allTypes()) {
-
     if (!doc) {
       return [];
     }
@@ -649,7 +600,6 @@ const olddatabase = {
   },
 
   withDescendants: async function <T extends BaseModel>(doc: T | null, stopType: string | null = null): Promise<BaseModel[]> {
-
     let docsToReturn: BaseModel[] = doc ? [doc] : [];
 
     async function next(docs: (BaseModel | null)[]): Promise<BaseModel[]> {
