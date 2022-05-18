@@ -50,8 +50,8 @@ describe('onChange()', () => {
     });
     expect(changesSeen.length).toBe(2);
     expect(changesSeen).toEqual([
-      [[db.CHANGE_INSERT, newDoc, false]],
-      [[db.CHANGE_UPDATE, updatedDoc, false]],
+      [['insert', newDoc, false]],
+      [['update', updatedDoc, false]],
     ]);
     db.offChange(callback);
     await models.request.create(doc);
@@ -85,16 +85,16 @@ describe('bufferChanges()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
     // Assert no more changes seen after flush again
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -120,8 +120,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -146,8 +146,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -181,8 +181,8 @@ describe('bufferChangesIndefinitely()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
