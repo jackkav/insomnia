@@ -41,107 +41,6 @@ export interface SpecificQuery {
 
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 
-// ipcdatabase={
-//   all:type => electron.ipcRenderer.invoke('db.fn', 'all', type),
-//   dbFn: (method, options) => electron.ipcRenderer.invoke('db.fn', method, type),
-// }
-
-const ipcdatabase = {
-  // required for redux reducer state changes
-  CHANGE_INSERT: 'insert',
-  CHANGE_UPDATE: 'update',
-  CHANGE_REMOVE: 'remove',
-  all: function(type: string) {
-    return electron.ipcRenderer.invoke('db.fn', 'all', type);
-  },
-  batchModifyDocs: function({ upsert = [], remove = [] }: Operation) {
-    return electron.ipcRenderer.invoke('db.fn', 'batchModifyDocs', { upsert, remove });
-  },
-  bufferChanges: function(millis = 1000) {
-    return electron.ipcRenderer.invoke('db.fn', 'bufferChanges', millis);
-  },
-  bufferChangesIndefinitely: function() {
-    return electron.ipcRenderer.invoke('db.fn', 'bufferChangesIndefinitely');
-  },
-  count: function(type: string, query: Query = {}) {
-    return electron.ipcRenderer.invoke('db.fn', 'count', type, query);
-  },
-  duplicate: function(originalDoc: any, patch: any = {}) {
-    return electron.ipcRenderer.invoke('db.fn', 'duplicate', originalDoc, patch);
-  },
-  docCreate: function(type, patch) {
-    return electron.ipcRenderer.invoke('db.fn', 'docCreate', type, patch);
-  },
-  docUpdate: function(type, patch) {
-    return electron.ipcRenderer.invoke('db.fn', 'docUpdate', type, patch);
-  },
-  find: function(
-    type: string,
-    query: Query | string = {},
-    sort: Sort = { created: 1 },
-  ) {
-    return electron.ipcRenderer.invoke('db.fn', 'find', type, query, sort);
-  },
-  findMostRecentlyModified: function(
-    type: string,
-    query: Query = {},
-    limit: number | null = null,
-  ) {
-    return electron.ipcRenderer.invoke('db.fn', 'findMostRecentlyModified', type, query, limit);
-  },
-  flushChanges: function(id = 0, fake = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'flushChanges', id, fake);
-  },
-  flushChangesAsync: function(fake = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'flushChangesAsync', fake);
-  },
-  get: function(type: string, id?: string) {
-    return electron.ipcRenderer.invoke('db.fn', 'get', type, id);
-  },
-  getMostRecentlyModified: function(type: string, query: Query = {}) {
-    return electron.ipcRenderer.invoke('db.fn', 'getMostRecentlyModified', type, query);
-  },
-  getWhere: function(type: string, query: any) {
-    return electron.ipcRenderer.invoke('db.fn', 'getWhere', type, query);
-  },
-  insert: function(doc: any, fromSync = false, initializeModel = true) {
-    return electron.ipcRenderer.invoke('db.fn', 'insert', doc, fromSync, initializeModel);
-  },
-  onChange: (callback: ChangeListener) => {
-    electron.ipcRenderer.on('db.changes', async (_e, changes) => callback(changes));
-  },
-  offChange: (callback: ChangeListener) => {
-    electron.ipcRenderer.removeListener('db.changes', async (_e, changes) => callback(changes));
-  },
-  remove: function(doc: any, fromSync = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'remove', doc, fromSync);
-  },
-  removeWhere: function(type: string, query: Query) {
-    return electron.ipcRenderer.invoke('db.fn', 'removeWhere', type, query);
-  },
-  /** Removes entries without removing their children */
-  unsafeRemove: function(doc: any, fromSync = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'unsafeRemove', doc, fromSync);
-  },
-  update: function(doc: any, fromSync = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'update', doc, fromSync);
-  },
-  // TODO(TSCONVERSION) the update method above can now take an upsert property
-  upsert: function(doc: any, fromSync = false) {
-    return electron.ipcRenderer.invoke('db.fn', 'upsert', doc, fromSync);
-  },
-  withAncestors: function(doc: any, types: string[] = allTypes()) {
-    return electron.ipcRenderer.invoke('db.fn', 'withAncestors', doc, types);
-  },
-  withDescendants: function(doc: any, stopType: string | null = null): Promise<BaseModel[]> {
-    return electron.ipcRenderer.invoke('db.fn', 'withDescendants', doc, stopType);
-  },
-};
-
-// Listen for response deletions and delete corresponding response body files
-
-type ChangeListener = Function;
-
 const olddatabase = {
   all: async function <T extends BaseModel>(type: string) {
     return olddatabase.find<T>(type);
@@ -168,12 +67,6 @@ const olddatabase = {
     bufferingChanges = true;
     return ++bufferChangesId;
   },
-
-  CHANGE_INSERT: 'insert',
-
-  CHANGE_UPDATE: 'update',
-
-  CHANGE_REMOVE: 'remove',
 
   count: async function <T extends BaseModel>(type: string, query: Query = {}) {
     return new Promise<number>((resolve, reject) => {
@@ -330,7 +223,6 @@ const olddatabase = {
       console.log(`[db] Dropped ${changes.length} changes.`);
       return;
     }
-    console.log('do we ever need to listen for changes in main?', changeListeners, changes, process.type);
 
     // NOTE: this is exclusively for deleting response and timeline files and could be moved somewhere more appropriate
     for (const [type, doc] of changes) {
@@ -342,7 +234,7 @@ const olddatabase = {
         continue;
       }
 
-      if (type === olddatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
+      if (type === 'remove' && typeof m.hookRemove === 'function') {
         try {
           await m.hookRemove(doc, console.log);
         } catch (err) {
@@ -464,7 +356,7 @@ const olddatabase = {
 
         resolve(newDoc);
         // NOTE: This needs to be after we resolve
-        notifyOfChange(olddatabase.CHANGE_INSERT, newDoc, fromSync);
+        notifyOfChange('insert', newDoc, fromSync);
       });
     });
   },
@@ -490,7 +382,7 @@ const olddatabase = {
       ),
     );
 
-    docs.map(d => notifyOfChange(olddatabase.CHANGE_REMOVE, d, fromSync));
+    docs.map(d => notifyOfChange('remove', d, fromSync));
     await olddatabase.flushChanges(flushId);
   },
 
@@ -515,7 +407,7 @@ const olddatabase = {
           },
         ),
       );
-      docs.map(d => notifyOfChange(olddatabase.CHANGE_REMOVE, d, false));
+      docs.map(d => notifyOfChange('remove', d, false));
     }
 
     await olddatabase.flushChanges(flushId);
@@ -524,7 +416,7 @@ const olddatabase = {
   /** Removes entries without removing their children */
   unsafeRemove: async function <T extends BaseModel>(doc: T, fromSync = false) {
     (db[doc.type] as NeDB<T>).remove({ _id: doc._id });
-    notifyOfChange(olddatabase.CHANGE_REMOVE, doc, fromSync);
+    notifyOfChange('remove', doc, fromSync);
   },
 
   update: async function <T extends BaseModel>(doc: T, fromSync = false) {
@@ -549,7 +441,7 @@ const olddatabase = {
 
           resolve(docWithDefaults);
           // NOTE: This needs to be after we resolve
-          notifyOfChange(olddatabase.CHANGE_UPDATE, docWithDefaults, fromSync);
+          notifyOfChange('update', docWithDefaults, fromSync);
         },
       );
     });
@@ -828,4 +720,4 @@ async function _fixOldGitURIs(doc: GitRepository) {
   console.log(`[fix] Fixed git URI for ${doc._id}`);
 }
 
-export const database = process.type === 'renderer' ? ipcdatabase : olddatabase;
+export const database = process.type === 'renderer' ? window.db : olddatabase;

@@ -123,12 +123,12 @@ export function reducer(state = initialEntitiesState, action) {
         const referenceName = getReducerName(doc.type);
 
         switch (event) {
-          case db.CHANGE_INSERT:
-          case db.CHANGE_UPDATE:
+          case 'insert':
+          case 'update':
             newState[referenceName][doc._id] = doc;
             break;
 
-          case db.CHANGE_REMOVE:
+          case 'remove':
             delete newState[referenceName][doc._id];
             break;
 
