@@ -41,6 +41,11 @@ export interface SpecificQuery {
 
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 
+// ipcdatabase={
+//   all:type => electron.ipcRenderer.invoke('db.fn', 'all', type),
+//   dbFn: (method, options) => electron.ipcRenderer.invoke('db.fn', 'all', type),
+// }
+
 const ipcdatabase = {
   // required for redux reducer state changes
   CHANGE_INSERT: 'insert',
@@ -99,22 +104,14 @@ const ipcdatabase = {
   getWhere: function(type: string, query: any) {
     return electron.ipcRenderer.invoke('db.fn', 'getWhere', type, query);
   },
-  initClient: () => {
-    electron.ipcRenderer.on('db.changes', async (_e, changes) => {
-      for (const fn of changeListeners) {
-        await fn(changes);
-      }
-    });
-    console.log('[db] Initialized DB client');
-  },
   insert: function(doc: any, fromSync = false, initializeModel = true) {
     return electron.ipcRenderer.invoke('db.fn', 'insert', doc, fromSync, initializeModel);
   },
   onChange: (callback: ChangeListener) => {
-    changeListeners.push(callback);
+    electron.ipcRenderer.on('db.changes', async (_e, changes) => callback(changes));
   },
   offChange: (callback: ChangeListener) => {
-    changeListeners = changeListeners.filter(l => l !== callback);
+    electron.ipcRenderer.removeListener('db.changes', async (_e, changes) => callback(changes));
   },
   remove: function(doc: any, fromSync = false) {
     return electron.ipcRenderer.invoke('db.fn', 'remove', doc, fromSync);
@@ -140,6 +137,46 @@ const ipcdatabase = {
     return electron.ipcRenderer.invoke('db.fn', 'withDescendants', doc, stopType);
   },
 };
+
+// Listen for response deletions and delete corresponding response body files
+
+type ChangeListener = Function;
+
+let changeListeners: ChangeListener[] = [async changes => {
+  for (const [type, doc] of changes) {
+    // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
+    // The type definition will be a little confusing
+    const m: Record<string, any> | null = models.getModel(doc.type);
+
+    if (!m) {
+      continue;
+    }
+
+    if (type === ipcdatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
+      try {
+        await m.hookRemove(doc, console.log);
+      } catch (err) {
+        console.log(`[db] Delete hook failed for ${type} ${doc._id}: ${err.message}`);
+      }
+    }
+
+    if (type === ipcdatabase.CHANGE_INSERT && typeof m.hookInsert === 'function') {
+      try {
+        await m.hookInsert(doc, console.log);
+      } catch (err) {
+        console.log(`[db] Insert hook failed for ${type} ${doc._id}: ${err.message}`);
+      }
+    }
+
+    if (type === ipcdatabase.CHANGE_UPDATE && typeof m.hookUpdate === 'function') {
+      try {
+        await m.hookUpdate(doc, console.log);
+      } catch (err) {
+        console.log(`[db] Update hook failed for ${type} ${doc._id}: ${err.message}`);
+      }
+    }
+  }
+}];
 
 const olddatabase = {
   all: async function <T extends BaseModel>(type: string) {
@@ -340,11 +377,8 @@ const olddatabase = {
       console.log(`[db] Dropped ${changes.length} changes.`);
       return;
     }
+    console.log('do we ever need to listen for changes in main?', changeListeners, changes, process.type);
 
-    // Notify local listeners too
-    for (const fn of changeListeners) {
-      await fn(changes);
-    }
     // Notify remote listeners
     const isMainContext = process.type === 'browser';
     if (isMainContext) {
@@ -388,21 +422,8 @@ const olddatabase = {
   init: async (
     types: string[],
     config: NeDB.DataStoreOptions = {},
-    forceReset = false,
     consoleLog: typeof console.log = console.log,
   ) => {
-    if (forceReset) {
-      changeListeners = [];
-
-      for (const attr of Object.keys(db)) {
-        if (attr === '_empty') {
-          continue;
-        }
-
-        delete db[attr];
-      }
-    }
-
     // Fill in the defaults
     for (const modelType of types) {
       if (db[modelType]) {
@@ -446,44 +467,6 @@ const olddatabase = {
       consoleLog(`[db] Initialized DB at ${getDBFilePath('$TYPE')}`);
     }
 
-    // This isn't the best place for this but w/e
-    // Listen for response deletions and delete corresponding response body files
-    ipcdatabase.onChange(async changes => {
-      for (const [type, doc] of changes) {
-        // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
-        // The type definition will be a little confusing
-        const m: Record<string, any> | null = models.getModel(doc.type);
-
-        if (!m) {
-          continue;
-        }
-
-        if (type === ipcdatabase.CHANGE_REMOVE && typeof m.hookRemove === 'function') {
-          try {
-            await m.hookRemove(doc, consoleLog);
-          } catch (err) {
-            consoleLog(`[db] Delete hook failed for ${type} ${doc._id}: ${err.message}`);
-          }
-        }
-
-        if (type === ipcdatabase.CHANGE_INSERT && typeof m.hookInsert === 'function') {
-          try {
-            await m.hookInsert(doc, consoleLog);
-          } catch (err) {
-            consoleLog(`[db] Insert hook failed for ${type} ${doc._id}: ${err.message}`);
-          }
-        }
-
-        if (type === ipcdatabase.CHANGE_UPDATE && typeof m.hookUpdate === 'function') {
-          try {
-            await m.hookUpdate(doc, consoleLog);
-          } catch (err) {
-            consoleLog(`[db] Update hook failed for ${type} ${doc._id}: ${err.message}`);
-          }
-        }
-      }
-    });
-
     for (const model of models.all()) {
       // @ts-expect-error -- TSCONVERSION optional type on response
       if (typeof model.hookDatabaseInit === 'function') {
@@ -491,15 +474,6 @@ const olddatabase = {
         await model.hookDatabaseInit?.(consoleLog);
       }
     }
-  },
-
-  initClient: async () => {
-    electron.ipcRenderer.on('db.changes', async (_e, changes) => {
-      for (const fn of changeListeners) {
-        await fn(changes);
-      }
-    });
-    console.log('[db] Initialized DB client');
   },
 
   insert: async function <T extends BaseModel>(doc: T, fromSync = false, initializeModel = true) {
@@ -749,10 +723,6 @@ type ChangeBufferEvent = [
 ];
 
 let changeBuffer: ChangeBufferEvent[] = [];
-
-type ChangeListener = Function;
-
-let changeListeners: ChangeListener[] = [];
 
 async function notifyOfChange<T extends BaseModel>(event: string, doc: T, fromSync: boolean) {
   let updatedDoc = doc;
