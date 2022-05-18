@@ -187,12 +187,15 @@ function _getOsName() {
 
 // Monitor database changes to see if analytics gets enabled.
 // If analytics become enabled, flush any queued events.
-db.onChange(async changes => {
-  for (const change of changes) {
-    const [event, doc] = change;
-    const isUpdatingSettings = isSettings(doc) && event === 'update';
-    if (isUpdatingSettings && doc.enableAnalytics) {
-      await flushQueuedEvents();
+// NOTE: changelisteners should be set in only render or main
+if (process.type === 'renderer') {
+  db.onChange(async changes => {
+    for (const change of changes) {
+      const [event, doc] = change;
+      const isUpdatingSettings = isSettings(doc) && event === 'update';
+      if (isUpdatingSettings && doc.enableAnalytics) {
+        await flushQueuedEvents();
+      }
     }
-  }
-});
+  });
+}

@@ -23,7 +23,6 @@ document.body.setAttribute('data-platform', process.platform);
 document.title = getProductName();
 
 (async function() {
-  await db.initClient();
   await initPlugins();
   const settings = await models.settings.getOrCreate();
 
