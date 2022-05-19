@@ -1,11 +1,9 @@
-/* eslint-disable prefer-rest-params -- don't want to change ...arguments usage for these sensitive functions without more testing */
 import electron from 'electron';
 import NeDB from 'nedb';
 import fsPath from 'path';
 
 import { mustGetModel } from '../models';
 import { CookieJar } from '../models/cookie-jar';
-import { Environment } from '../models/environment';
 import { GitRepository } from '../models/git-repository';
 import { getMonkeyPatchedControlledSettings } from '../models/helpers/settings';
 import type { BaseModel } from '../models/index';
@@ -13,7 +11,6 @@ import * as models from '../models/index';
 import { isSettings } from '../models/settings';
 import type { Workspace } from '../models/workspace';
 import { DB_PERSIST_INTERVAL } from './constants';
-import { getDataDirectory } from './electron-helpers';
 import { generateId } from './misc';
 
 export interface Query {
@@ -41,14 +38,16 @@ export interface SpecificQuery {
 
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 const all = (type: string) => find(type);
-const batchModifyDocs = async ({ upsert = [], remove = [] }: Operation) => {
+const batchModifyDocs = async ({ upsert: upserts, remove: removes }: Operation) => {
   const flushId = await bufferChanges();
   // Perform from least to most dangerous
-  await Promise.all(upsert.map(doc => upsert(doc, true)));
-  await Promise.all(remove.map(doc => unsafeRemove(doc, true)));
+  await Promise.all(upserts?.map(doc => upsert(doc, true)));
+  await Promise.all(removes?.map(doc => unsafeRemove(doc, true)));
 
   await flushChanges(flushId);
 };
+// NOTE: seems buffer and flush is intended to offer atomicity
+// Ideas: attempt it without file scoped variables and timeouts
 const bufferChanges = async (millis = 1000) => {
   bufferingChanges = true;
   setTimeout(flushChanges, millis);
@@ -493,26 +492,21 @@ export const initializeDatabase = async (
     collection.persistence.setAutocompactionInterval(DB_PERSIST_INTERVAL);
     db[modelType] = collection;
   }
-  if (config.inMemoryOnly) {
-    return;
-  }
-  // NOTE: listens for ipc calls from renderer
-  electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
-    try {
-      console.log('handled ', fnName, ...args);
-      return await neDBWrapper[fnName](...args);
-    } catch (err) {
-      console.error('something went wrong');
-      return {
-        message: err.message,
-        stack: err.stack,
-      };
-    }
-  });
 
-  // NOTE: Only repair the DB if we're not running in memory. Repairing here causes tests to hang indefinitely for some reason.
-  // TODO: Figure out why this makes tests hang
   if (!config.inMemoryOnly) {
+    // NOTE: listens for ipc calls from renderer
+    electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
+      try {
+        console.log('handled ', fnName, ...args);
+        return await neDBWrapper[fnName](...args);
+      } catch (err) {
+        console.error('something went wrong');
+        return {
+          message: err.message,
+          stack: err.stack,
+        };
+      }
+    });
     await _repairDatabase();
     console.log(`[db] Initialized DB at ${pathToUserData}`);
   }

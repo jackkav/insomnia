@@ -4,7 +4,7 @@ import { getBodyBuffer } from '../models/response';
 import { Settings } from '../models/settings';
 import { send } from '../network/network';
 import * as plugins from '../plugins';
-import { database } from './database';
+import { initializeDatabase } from './database';
 
 // The network layer uses settings from the settings model
 // We want to give consumers the ability to override certain settings
@@ -12,13 +12,11 @@ type SettingsOverride = Pick<Settings, 'validateSSL'>;
 
 export async function getSendRequestCallbackMemDb(environmentId: string, memDB: any, settingsOverrides?: SettingsOverride) {
   // Initialize the DB in-memory and fill it with data if we're given one
-  await database.init(
+  await initializeDatabase(
     modelTypes(),
     {
       inMemoryOnly: true,
     },
-    true,
-    () => { },
   );
   const docs: BaseModel[] = [];
 

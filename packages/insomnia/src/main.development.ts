@@ -7,7 +7,7 @@ import path from 'path';
 import appConfig from '../config/config.json';
 import { SegmentEvent, trackSegmentEvent } from './common/analytics';
 import { changelogUrl, getAppVersion, isDevelopment, isMac } from './common/constants';
-import { database } from './common/database';
+import { initializeDatabase } from './common/database';
 import { disableSpellcheckerDownload } from './common/electron-helpers';
 import log, { initializeLogging } from './common/log';
 import { validateInsomniaConfig } from './common/validate-insomnia-config';
@@ -82,7 +82,7 @@ app.on('ready', async () => {
   }
 
   // Init some important things first
-  await database.init(models.types());
+  await initializeDatabase(models.types());
   await _createModelInstances();
   errorHandling.init();
   windowUtils.init();
