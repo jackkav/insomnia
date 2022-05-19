@@ -1,7 +1,7 @@
 import { globalBeforeEach } from '../../__jest__/before-each';
 import * as models from '../../models';
 import { data as fixtures } from '../__fixtures__/nestedfolders';
-import { _repairDatabase, database as db } from '../database';
+import { _repairDatabase, database as db, initializeDatabase } from '../database';
 
 function loadFixture() {
   const promises: Promise<models.BaseModel>[] = [];
@@ -14,14 +14,14 @@ function loadFixture() {
   return Promise.all(promises);
 }
 
-describe('init()', () => {
+describe('initializeDatabase()', () => {
   beforeEach(globalBeforeEach);
 
   it('handles being initialized twice', async () => {
-    await db.init(models.types(), {
+    await initializeDatabase(models.types(), {
       inMemoryOnly: true,
     });
-    await db.init(models.types(), {
+    await initializeDatabase(models.types(), {
       inMemoryOnly: true,
     });
     expect((await db.all(models.request.type)).length).toBe(0);
