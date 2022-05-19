@@ -10,6 +10,5 @@ export async function globalBeforeEach() {
     {
       inMemoryOnly: true,
     },
-    () => {},
   );
 }

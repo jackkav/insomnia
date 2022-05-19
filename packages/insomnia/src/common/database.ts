@@ -125,7 +125,7 @@ const olddatabase = {
       const createdDoc = await olddatabase.insert(newDoc, false, false);
 
       // 2. Get all the children
-      for (const type of allTypes()) {
+      for (const type of Object.keys(db)) {
         // Note: We never want to duplicate a response
         if (!models.canDuplicate(type)) {
           continue;
@@ -253,12 +253,6 @@ const olddatabase = {
     }
   },
 
-  flushChangesAsync: async (fake = false) => {
-    process.nextTick(async () => {
-      await olddatabase.flushChanges(0, fake);
-    });
-  },
-
   get: async function <T extends BaseModel>(type: string, id?: string) {
     // Short circuit IDs used to represent nothing
     if (!id || id === 'n/a') {
@@ -277,62 +271,6 @@ const olddatabase = {
     // @ts-expect-error -- TSCONVERSION type narrowing needed
     const docs = await olddatabase.find<T>(type, query);
     return docs.length ? docs[0] : null;
-  },
-
-  init: async (
-    types: string[],
-    config: NeDB.DataStoreOptions = {},
-    consoleLog: typeof console.log = console.log,
-  ) => {
-    // Fill in the defaults
-    for (const modelType of types) {
-      if (db[modelType]) {
-        consoleLog(`[db] Already initialized DB.${modelType}`);
-        continue;
-      }
-
-      const filePath = getDBFilePath(modelType);
-      const collection = new NeDB(
-        Object.assign(
-          {
-            autoload: true,
-            filename: filePath,
-            corruptAlertThreshold: 0.9,
-          },
-          config,
-        ),
-      );
-      collection.persistence.setAutocompactionInterval(DB_PERSIST_INTERVAL);
-      db[modelType] = collection;
-    }
-
-    electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
-      try {
-        console.log('handled ', fnName, ...args);
-        return await olddatabase[fnName](...args);
-      } catch (err) {
-        console.error('something went wrong');
-        return {
-          message: err.message,
-          stack: err.stack,
-        };
-      }
-    });
-
-    // NOTE: Only repair the DB if we're not running in memory. Repairing here causes tests to hang indefinitely for some reason.
-    // TODO: Figure out why this makes tests hang
-    if (!config.inMemoryOnly) {
-      await _repairDatabase();
-      consoleLog(`[db] Initialized DB at ${getDBFilePath('$TYPE')}`);
-    }
-
-    for (const model of models.all()) {
-      // @ts-expect-error -- TSCONVERSION optional type on response
-      if (typeof model.hookDatabaseInit === 'function') {
-        // @ts-expect-error -- TSCONVERSION optional type on response
-        await model.hookDatabaseInit?.(consoleLog);
-      }
-    }
   },
 
   insert: async function <T extends BaseModel>(doc: T, fromSync = false, initializeModel = true) {
@@ -457,7 +395,7 @@ const olddatabase = {
     }
   },
 
-  withAncestors: async function <T extends BaseModel>(doc: T | null, types: string[] = allTypes()) {
+  withAncestors: async function <T extends BaseModel>(doc: T | null, types: string[] = Object.keys(db)) {
     if (!doc) {
       return [];
     }
@@ -504,7 +442,7 @@ const olddatabase = {
 
         const promises: Promise<BaseModel[]>[] = [];
 
-        for (const type of allTypes()) {
+        for (const type of Object.keys(db)) {
           // If the doc is null, we want to search for parentId === null
           const parentId = doc ? doc._id : null;
           const promise = olddatabase.find(type, { parentId });
@@ -537,24 +475,66 @@ interface DB {
     [index: string]: NeDB;
 }
 
-// @ts-expect-error -- TSCONVERSION _empty doesn't match the index signature, use something other than _empty in future
-const db: DB = {
-  _empty: true,
-} as DB;
+const db: DB = {} as DB;
 
-// ~~~~~~~ //
-// HELPERS //
-// ~~~~~~~ //
-const allTypes = () => Object.keys(db);
+const initDatabase = async (
+  types: string[],
+  config: NeDB.DataStoreOptions = {},
+) => {
+  // Fill in the defaults
+  const pathToUserData = process.env['INSOMNIA_DATA_PATH'] || electron.app.getPath('userData');
+  for (const modelType of types) {
+    if (db[modelType]) {
+      console.log(`[db] Already initialized DB.${modelType}`);
+      continue;
+    }
+    const filename = fsPath.join(pathToUserData, `insomnia.${modelType}.db`);
+    // NOTE: makes a new nedb instance for every document
+    const collection = new NeDB({
+      autoload: true,
+      corruptAlertThreshold: 0.9,
+      ...(config.inMemoryOnly ? { } : { filename }),
+      ...config,
+    });
 
-function getDBFilePath(modelType: string) {
-  // NOTE: Do not EVER change this. EVER!
-  return fsPath.join(getDataDirectory(), `insomnia.${modelType}.db`);
-}
+    collection.persistence.setAutocompactionInterval(DB_PERSIST_INTERVAL);
+    db[modelType] = collection;
+  }
+  if (config.inMemoryOnly) {
+    return;
+  }
+  // NOTE: listens for ipc calls from renderer
+  electron.ipcMain.handle('db.fn', async (_, fnName, ...args) => {
+    try {
+      console.log('handled ', fnName, ...args);
+      return await olddatabase[fnName](...args);
+    } catch (err) {
+      console.error('something went wrong');
+      return {
+        message: err.message,
+        stack: err.stack,
+      };
+    }
+  });
 
-// ~~~~~~~~~~~~~~~~ //
-// Change Listeners //
-// ~~~~~~~~~~~~~~~~ //
+  // NOTE: Only repair the DB if we're not running in memory. Repairing here causes tests to hang indefinitely for some reason.
+  // TODO: Figure out why this makes tests hang
+  if (!config.inMemoryOnly) {
+    await _repairDatabase();
+    console.log(`[db] Initialized DB at ${pathToUserData}`);
+  }
+
+  // NOTE: yet another way to delete responses
+  for (const model of models.all()) {
+    // @ts-expect-error -- TSCONVERSION optional type on response
+    if (typeof model.hookDatabaseInit === 'function') {
+      // @ts-expect-error -- TSCONVERSION optional type on response
+      await model.hookDatabaseInit?.(consoleLog);
+    }
+  }
+};
+olddatabase.init = initDatabase;
+
 let bufferingChanges = false;
 let bufferChangesId = 1;
 

@@ -21,7 +21,6 @@ const db = {
   find: (type, query = {}, sort = { created: 1 }) => ipcRenderer.invoke('db.fn', 'find', type, query, sort),
   findMostRecentlyModified: (type, query = {}, limit = null,) => ipcRenderer.invoke('db.fn', 'findMostRecentlyModified', type, query, limit),
   flushChanges: (id = 0, fake = false) => ipcRenderer.invoke('db.fn', 'flushChanges', id, fake),
-  flushChangesAsync: (fake = false) => ipcRenderer.invoke('db.fn', 'flushChangesAsync', fake),
   get: (type, id) => ipcRenderer.invoke('db.fn', 'get', type, id),
   getMostRecentlyModified: (type, query = {}) => ipcRenderer.invoke('db.fn', 'getMostRecentlyModified', type, query),
   getWhere: (type, query) => ipcRenderer.invoke('db.fn', 'getWhere', type, query),
