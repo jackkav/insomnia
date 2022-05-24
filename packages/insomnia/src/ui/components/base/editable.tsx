@@ -32,6 +32,7 @@ interface Props {
 export const Editable = ({
   value,
   fallbackValue,
+  // Q: when is this needed?
   blankValue,
   singleClick,
   onEditStart,
@@ -53,18 +54,20 @@ export const Editable = ({
       inputRef?.current?.select();
     });
 
-    // Used for drag and drop in parent component
+    // Q: Only used for drag and drop in one parent component use case, how to improve?
     if (onEditStart) {
       onEditStart();
     }
   };
 
   const _handleEditEnd = () => {
+    // Q: can preventBlank be defaulted to true?
     if (shouldSave(value, inputRef?.current?.value.trim(), preventBlank)) {
       // Don't run onSubmit for values that haven't been changed
       onSubmit(inputRef?.current?.value.trim());
     }
 
+    // WARN: can we not do this?
     // This timeout prevents the UI from showing the old value after submit.
     // It should give the UI enough time to redraw the new value.
     setTimeout(() => setEdit(false), 100);
@@ -72,21 +75,19 @@ export const Editable = ({
 
   if (isEditing) {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.keyCode === 13) {
-        // Pressed Enter
+      const isEnter = event.keyCode === 13;
+      const isEscape = event.keyCode === 27;
+      if (isEnter) {
         _handleEditEnd();
         return;
       }
-      if (event.keyCode === 27) {
-        // Pressed Escape
+      if (isEscape) {
         // Prevent bubbling to modals and other escape listeners.
         event.stopPropagation();
 
         if (inputRef.current) {
           // Set the input to the original value
           inputRef.current.value = value;
-
-          _handleEditEnd();
         }
       }
     };
