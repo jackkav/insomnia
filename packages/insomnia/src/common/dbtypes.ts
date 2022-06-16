@@ -23,11 +23,7 @@ export interface SpecificQuery {
   $nin?: string[];
 }
 
-export enum ChangeType {
-  INSERT = 'insert',
-  UPDATE = 'update',
-  REMOVE = 'remove',
-}
+export type ChangeType = 'insert' | 'update' | 'remove';
 
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 

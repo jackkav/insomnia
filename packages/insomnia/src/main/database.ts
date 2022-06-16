@@ -3,8 +3,7 @@ import NeDB from 'nedb';
 import path from 'path';
 
 import { DB_PERSIST_INTERVAL } from '../common/constants';
-import { ChangeBufferEvent, ChangeListener, Database, docCreate, docUpdate, ModelQuery, Operation, Query, Sort } from '../common/dbtypes';
-import { ChangeType } from '../common/dbtypes';
+import { ChangeBufferEvent, ChangeListener, ChangeType, Database, docCreate, docUpdate, ModelQuery, Operation, Query, Sort } from '../common/dbtypes';
 import { getDataDirectory } from '../common/electron-helpers';
 import { generateId } from '../common/misc';
 import { mustGetModel } from '../models';
@@ -93,7 +92,7 @@ export class DatabaseHost implements Database {
           continue;
         }
 
-        if (type === ChangeType.REMOVE && typeof m.hookRemove === 'function') {
+        if (type === 'remove' && typeof m.hookRemove === 'function') {
           try {
             await m.hookRemove(doc, consoleLog);
           } catch (err) {
@@ -101,7 +100,7 @@ export class DatabaseHost implements Database {
           }
         }
 
-        if (type === ChangeType.INSERT && typeof m.hookInsert === 'function') {
+        if (type === 'insert' && typeof m.hookInsert === 'function') {
           try {
             await m.hookInsert(doc, consoleLog);
           } catch (err) {
@@ -109,7 +108,7 @@ export class DatabaseHost implements Database {
           }
         }
 
-        if (type === ChangeType.UPDATE && typeof m.hookUpdate === 'function') {
+        if (type === 'update' && typeof m.hookUpdate === 'function') {
           try {
             await m.hookUpdate(doc, consoleLog);
           } catch (err) {
@@ -368,7 +367,7 @@ export class DatabaseHost implements Database {
 
         resolve(newDoc);
         // NOTE: This needs to be after we resolve
-        this.notifyOfChange(ChangeType.INSERT, newDoc, fromSync);
+        this.notifyOfChange('remove', newDoc, fromSync);
       });
     });
   }
@@ -394,7 +393,7 @@ export class DatabaseHost implements Database {
       ),
     );
 
-    docs.map(d => this.notifyOfChange(ChangeType.REMOVE, d, fromSync));
+    docs.map(d => this.notifyOfChange('remove', d, fromSync));
     await this.flushChanges(flushId);
   }
 
@@ -419,7 +418,7 @@ export class DatabaseHost implements Database {
           },
         ),
       );
-      docs.map(d => this.notifyOfChange(ChangeType.REMOVE, d, false));
+      docs.map(d => this.notifyOfChange('remove', d, false));
     }
 
     await this.flushChanges(flushId);
@@ -428,7 +427,7 @@ export class DatabaseHost implements Database {
   /** Removes entries without removing their children */
   async unsafeRemove(doc: BaseModel, fromSync = false): Promise<void> {
     this.db[doc.type].remove({ _id: doc._id });
-    this.notifyOfChange(ChangeType.REMOVE, doc, fromSync);
+    this.notifyOfChange('remove', doc, fromSync);
   }
 
   async update<T extends BaseModel = BaseModel>(doc: T, fromSync = false): Promise<T> {
@@ -453,7 +452,7 @@ export class DatabaseHost implements Database {
 
           resolve(docWithDefaults);
           // NOTE: This needs to be after we resolve
-          this.notifyOfChange(ChangeType.UPDATE, docWithDefaults, fromSync);
+          this.notifyOfChange('update', docWithDefaults, fromSync);
         },
       );
     });
@@ -557,7 +556,7 @@ export class DatabaseHost implements Database {
   // Change Listeners //
   // ~~~~~~~~~~~~~~~~ //
 
-  async notifyOfChange<T extends BaseModel>(event: string, doc: T, fromSync: boolean) {
+  async notifyOfChange<T extends BaseModel>(event: ChangeType, doc: T, fromSync: boolean) {
     let updatedDoc = doc;
 
     // NOTE: this monkeypatching is temporary, and was determined to have the smallest blast radius if it exists here (rather than, say, a reducer or an action creator).

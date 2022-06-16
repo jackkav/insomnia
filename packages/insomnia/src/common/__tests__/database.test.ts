@@ -4,7 +4,7 @@ import { globalBeforeEach } from '../../__jest__/before-each';
 import { database as db } from '../../main/database';
 import * as models from '../../models';
 import { data as fixtures } from '../__fixtures__/nestedfolders';
-import { ChangeBufferEvent, ChangeType } from '../dbtypes';
+import { ChangeBufferEvent } from '../dbtypes';
 
 function loadFixture() {
   const promises: Promise<models.BaseModel>[] = [];
@@ -53,8 +53,8 @@ describe('onChange()', () => {
     });
     expect(changesSeen.length).toBe(2);
     expect(changesSeen).toEqual([
-      [[ChangeType.INSERT, newDoc, false]],
-      [[ChangeType.UPDATE, updatedDoc, false]],
+      [['insert', newDoc, false]],
+      [['update', updatedDoc, false]],
     ]);
     db.offChange(callback);
     await models.request.create(doc);
@@ -88,16 +88,16 @@ describe('bufferChanges()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [ChangeType.INSERT, newDoc, false],
-        [ChangeType.UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
     // Assert no more changes seen after flush again
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [ChangeType.INSERT, newDoc, false],
-        [ChangeType.UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -123,8 +123,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect(changesSeen).toEqual([
       [
-        [ChangeType.INSERT, newDoc, false],
-        [ChangeType.UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -149,8 +149,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
     expect(changesSeen).toEqual([
       [
-        [ChangeType.INSERT, newDoc, false],
-        [ChangeType.UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });
@@ -184,8 +184,8 @@ describe('bufferChangesIndefinitely()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [ChangeType.INSERT, newDoc, false],
-        [ChangeType.UPDATE, updatedDoc, false],
+        ['insert', newDoc, false],
+        ['update', updatedDoc, false],
       ],
     ]);
   });

@@ -29,7 +29,7 @@ import {
   SortOrder,
 } from '../../common/constants';
 import { database as db } from '../../common/database';
-import { ChangeBufferEvent, ChangeType } from '../../common/dbtypes';
+import { ChangeBufferEvent } from '../../common/dbtypes';
 import { getDataDirectory } from '../../common/electron-helpers';
 import { exportHarRequest } from '../../common/har';
 import { hotKeyRefs } from '../../common/hotkeys';
@@ -1212,7 +1212,7 @@ class App extends PureComponent<AppProps, State> {
       }
 
       // Delete VCS project if workspace deleted
-      if (vcs && isWorkspace(doc) && type === ChangeType.REMOVE) {
+      if (vcs && isWorkspace(doc) && type === 'remove') {
         await vcs.removeBackendProjectsForRoot(doc._id);
       }
     }
