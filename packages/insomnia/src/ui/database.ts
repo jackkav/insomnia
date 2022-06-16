@@ -4,6 +4,9 @@ import { ChangeListener, Database, docCreate, docUpdate, Operation, Query, Sort,
 import { BaseModel } from '../models';
 
 export class DatabaseClient implements Database {
+  init() {
+
+  }
   onChange(callback: ChangeListener) {
     electron.ipcRenderer.on('db.changes', async (_e, changes) => callback(changes));
   }
