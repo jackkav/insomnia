@@ -1,16 +1,15 @@
 import electron from 'electron';
 
-import { notifyChange } from '../common/database';
-import { ChangeBufferEvent, Database, DatabaseCommon, docCreate, docUpdate, Operation, Query, Sort, SpecificQuery } from '../common/dbtypes';
+import { ChangeListener, Database, docCreate, docUpdate, Operation, Query, Sort, SpecificQuery } from '../common/dbtypes';
 import { BaseModel } from '../models';
 
-export class DatabaseClient extends DatabaseCommon implements Database {
-  init() {
-    electron.ipcRenderer.on('db.changes', async (_e, changes: ChangeBufferEvent[]) => {
-      notifyChange(changes);
-    });
+export class DatabaseClient implements Database {
+  onChange(callback: ChangeListener) {
+    electron.ipcRenderer.on('db.changes', async (_e, changes) => callback(changes));
+  }
 
-    console.log('[db] Initialized DB client');
+  offChange(callback: ChangeListener) {
+    electron.ipcRenderer.removeListener('db.changes', async (_e, changes) => callback(changes));
   }
 
   all<T extends BaseModel = BaseModel>(type: string): Promise<T[]> {

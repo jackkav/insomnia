@@ -6,21 +6,17 @@ import { Provider } from 'react-redux';
 import { MemoryRouter as Router } from 'react-router-dom';
 
 import { getProductName, isDevelopment } from '../common/constants';
-import { database as db, setDatabase } from '../common/database';
+import { database as db } from '../common/database';
 import { initializeLogging } from '../common/log';
 import * as models from '../models';
 import { initNewOAuthSession } from '../network/o-auth-2/misc';
 import { init as initPlugins } from '../plugins';
 import { applyColorScheme } from '../plugins/misc';
 import App from './containers/app';
-import { database } from './database';
 import { init as initStore } from './redux/modules';
 import { initializeSentry } from './sentry';
 
 import './css/index.less'; // this import must come after `App`.  the reason is not yet known.
-
-database.init();
-setDatabase(database);
 
 initializeSentry();
 initializeLogging();

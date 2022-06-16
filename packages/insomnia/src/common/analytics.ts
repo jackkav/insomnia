@@ -3,7 +3,6 @@ import { AxiosRequestConfig } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 
 import { getAccountId } from '../account/session';
-import { onChange } from '../common/database';
 import * as models from '../models/index';
 import { isSettings } from '../models/settings';
 import {
@@ -12,6 +11,7 @@ import {
   getProductName,
   getSegmentWriteKey,
 } from './constants';
+import { database } from './database';
 
 const axiosConfig: AxiosRequestConfig = {
   // This is needed to ensure that we use the NodeJS adapter in the render process
@@ -195,12 +195,14 @@ function _getOsName() {
 
 // Monitor database changes to see if analytics gets enabled.
 // If analytics become enabled, flush any queued events.
-onChange(async changes => {
-  for (const change of changes) {
-    const [event, doc] = change;
-    const isUpdatingSettings = isSettings(doc) && event === 'update';
-    if (isUpdatingSettings && doc.enableAnalytics) {
-      await flushQueuedEvents();
+if (process.type === 'browser') {
+  database.onChange(async changes => {
+    for (const change of changes) {
+      const [event, doc] = change;
+      const isUpdatingSettings = isSettings(doc) && event === 'update';
+      if (isUpdatingSettings && doc.enableAnalytics) {
+        await flushQueuedEvents();
+      }
     }
-  }
-});
+  });
+}

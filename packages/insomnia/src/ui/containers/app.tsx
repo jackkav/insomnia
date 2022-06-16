@@ -28,8 +28,8 @@ import {
   PreviewMode,
   SortOrder,
 } from '../../common/constants';
-import { database as db, offChange, onChange } from '../../common/database';
-import { ChangeBufferEvent } from '../../common/dbtypes';
+import { database as db } from '../../common/database';
+import { ChangeBufferEvent, ChangeType } from '../../common/dbtypes';
 import { getDataDirectory } from '../../common/electron-helpers';
 import { exportHarRequest } from '../../common/har';
 import { hotKeyRefs } from '../../common/hotkeys';
@@ -1212,7 +1212,7 @@ class App extends PureComponent<AppProps, State> {
       }
 
       // Delete VCS project if workspace deleted
-      if (vcs && isWorkspace(doc) && type === db.CHANGE_REMOVE) {
+      if (vcs && isWorkspace(doc) && type === ChangeType.REMOVE) {
         await vcs.removeBackendProjectsForRoot(doc._id);
       }
     }
@@ -1237,7 +1237,7 @@ class App extends PureComponent<AppProps, State> {
     // Update VCS
     await this._updateVCS();
     await this._updateGitVCS();
-    onChange(this._handleDbChange);
+    db.onChange(this._handleDbChange);
     ipcRenderer.on('toggle-preferences', () => {
       App._handleShowSettingsModal();
     });
@@ -1360,7 +1360,7 @@ class App extends PureComponent<AppProps, State> {
     // Remove mouse and key handlers
     document.removeEventListener('mouseup', this._handleMouseUp);
     document.removeEventListener('mousemove', this._handleMouseMove);
-    offChange(this._handleDbChange);
+    db.offChange(this._handleDbChange);
   }
 
   async _ensureWorkspaceChildren() {

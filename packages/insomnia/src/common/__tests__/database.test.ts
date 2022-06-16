@@ -4,8 +4,7 @@ import { globalBeforeEach } from '../../__jest__/before-each';
 import { database as db } from '../../main/database';
 import * as models from '../../models';
 import { data as fixtures } from '../__fixtures__/nestedfolders';
-import { offChange, onChange } from '../database';
-import { ChangeBufferEvent } from '../dbtypes';
+import { ChangeBufferEvent, ChangeType } from '../dbtypes';
 
 function loadFixture() {
   const promises: Promise<models.BaseModel>[] = [];
@@ -47,17 +46,17 @@ describe('onChange()', () => {
       changesSeen.push(change);
     };
 
-    onChange(callback);
+    db.onChange(callback);
     const newDoc = await models.request.create(doc);
     const updatedDoc = await models.request.update(newDoc, {
       name: 'bar',
     });
     expect(changesSeen.length).toBe(2);
     expect(changesSeen).toEqual([
-      [[db.CHANGE_INSERT, newDoc, false]],
-      [[db.CHANGE_UPDATE, updatedDoc, false]],
+      [[ChangeType.INSERT, newDoc, false]],
+      [[ChangeType.UPDATE, updatedDoc, false]],
     ]);
-    offChange(callback);
+    db.offChange(callback);
     await models.request.create(doc);
     expect(changesSeen.length).toBe(2);
   });
@@ -78,7 +77,7 @@ describe('bufferChanges()', () => {
       changesSeen.push(change);
     };
 
-    onChange(callback);
+    db.onChange(callback);
     await db.bufferChanges();
     const newDoc = await models.request.create(doc);
     // @ts-expect-error -- TSCONVERSION appears to be genuine
@@ -89,16 +88,16 @@ describe('bufferChanges()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        [ChangeType.INSERT, newDoc, false],
+        [ChangeType.UPDATE, updatedDoc, false],
       ],
     ]);
     // Assert no more changes seen after flush again
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        [ChangeType.INSERT, newDoc, false],
+        [ChangeType.UPDATE, updatedDoc, false],
       ],
     ]);
   });
@@ -115,7 +114,7 @@ describe('bufferChanges()', () => {
       changesSeen.push(change);
     };
 
-    onChange(callback);
+    db.onChange(callback);
     await db.bufferChanges();
     const newDoc = await models.request.create(doc);
     // @ts-expect-error -- TSCONVERSION appears to be genuine
@@ -124,8 +123,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        [ChangeType.INSERT, newDoc, false],
+        [ChangeType.UPDATE, updatedDoc, false],
       ],
     ]);
   });
@@ -142,7 +141,7 @@ describe('bufferChanges()', () => {
       changesSeen.push(change);
     };
 
-    onChange(callback);
+    db.onChange(callback);
     await db.bufferChanges(500);
     const newDoc = await models.request.create(doc);
     // @ts-expect-error -- TSCONVERSION appears to be genuine
@@ -150,8 +149,8 @@ describe('bufferChanges()', () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        [ChangeType.INSERT, newDoc, false],
+        [ChangeType.UPDATE, updatedDoc, false],
       ],
     ]);
   });
@@ -172,7 +171,7 @@ describe('bufferChangesIndefinitely()', () => {
       changesSeen.push(change);
     };
 
-    onChange(callback);
+    db.onChange(callback);
     await db.bufferChangesIndefinitely();
     const newDoc = await models.request.create(doc);
     // @ts-expect-error -- TSCONVERSION appears to be genuine
@@ -185,8 +184,8 @@ describe('bufferChangesIndefinitely()', () => {
     await db.flushChanges();
     expect(changesSeen).toEqual([
       [
-        [db.CHANGE_INSERT, newDoc, false],
-        [db.CHANGE_UPDATE, updatedDoc, false],
+        [ChangeType.INSERT, newDoc, false],
+        [ChangeType.UPDATE, updatedDoc, false],
       ],
     ]);
   });

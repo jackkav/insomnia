@@ -1,10 +1,10 @@
 import * as Sentry from '@sentry/electron/main';
 import type { SentryRequestType } from '@sentry/types';
 
-import { onChange } from '../common/database';
 import { SENTRY_OPTIONS } from '../common/sentry';
 import * as models from '../models/index';
 import { isSettings } from '../models/settings';
+import { database } from './database';
 
 let enabled = false;
 
@@ -16,7 +16,7 @@ export function sentryWatchAnalyticsEnabled() {
     enabled = settings.enableAnalytics;
   });
 
-  onChange(async changes => {
+  database.onChange(async changes => {
     for (const change of changes) {
       const [event, doc] = change;
       if (isSettings(doc) && event === 'update') {

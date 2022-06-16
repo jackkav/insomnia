@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from '@jest/globals';
 
 import { globalBeforeEach } from '../../../__jest__/before-each';
-import { database as db, offChange, onChange } from '../../../common/database';
+import { database as db } from '../../../common/database';
+import { ChangeType } from '../../../common/dbtypes';
 import * as models from '../../../models';
 
 describe('settings database', () => {
@@ -15,7 +16,7 @@ describe('settings database', () => {
       const callback = (change: Function) => {
         changes.push(change);
       };
-      onChange(callback as any);
+      db.onChange(callback as any);
 
       await models.settings.patch({
         incognitoMode: true,
@@ -26,10 +27,10 @@ describe('settings database', () => {
       const expectedSettings = await models.settings.getOrCreate();
 
       expect(changes[0]).toEqual([
-        [db.CHANGE_UPDATE, expectedSettings, false],
+        [ChangeType.UPDATE, expectedSettings, false],
       ]);
 
-      offChange(callback as any);
+      db.offChange(callback as any);
     });
   });
 

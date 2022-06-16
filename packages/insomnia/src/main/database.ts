@@ -3,9 +3,8 @@ import NeDB from 'nedb';
 import path from 'path';
 
 import { DB_PERSIST_INTERVAL } from '../common/constants';
-import { notifyChange, onChange } from '../common/database';
-import { ChangeBufferEvent, Database, docCreate, docUpdate, ModelQuery, Operation, Query, Sort } from '../common/dbtypes';
-import { ChangeType, DatabaseCommon } from '../common/dbtypes';
+import { ChangeBufferEvent, ChangeListener, Database, docCreate, docUpdate, ModelQuery, Operation, Query, Sort } from '../common/dbtypes';
+import { ChangeType } from '../common/dbtypes';
 import { getDataDirectory } from '../common/electron-helpers';
 import { generateId } from '../common/misc';
 import { mustGetModel } from '../models';
@@ -22,11 +21,11 @@ interface DB {
   [index: string]: NeDB;
 }
 
-export class DatabaseHost extends DatabaseCommon implements Database {
+export class DatabaseHost implements Database {
   bufferingChanges = false;
   bufferChangesId = 1;
   changeBuffer: ChangeBufferEvent[] = [];
-
+  changeListeners: ChangeListener[] = [];
   private readonly db: DB = {};
 
   private static getDBFilePath(modelType: string): string {
@@ -35,6 +34,14 @@ export class DatabaseHost extends DatabaseCommon implements Database {
   }
 
   allTypes = () => Object.keys(this.db);
+
+  onChange(callback: ChangeListener) {
+    this.changeListeners.push(callback);
+  }
+
+  offChange(callback: ChangeListener) {
+    this.changeListeners = this.changeListeners.filter(l => l !== callback);
+  }
 
   async init(
     types: string[],
@@ -76,7 +83,7 @@ export class DatabaseHost extends DatabaseCommon implements Database {
 
     // This isn't the best place for this but w/e
     // Listen for response deletions and delete corresponding response body files
-    onChange(async changes => {
+    this.changeListeners = [(async changes => {
       for (const [type, doc] of changes) {
         // TODO(TSCONVERSION) what's returned here is the entire model implementation, not just a model
         // The type definition will be a little confusing
@@ -110,7 +117,7 @@ export class DatabaseHost extends DatabaseCommon implements Database {
           }
         }
       }
-    });
+    })];
 
     for (const model of models.all()) {
       // @ts-expect-error -- TSCONVERSION optional type on response
@@ -127,15 +134,15 @@ export class DatabaseHost extends DatabaseCommon implements Database {
   async _repairDatabase() {
     console.log('[fix] Running database repairs');
 
-    for (const workspace of await (this.find(models.workspace.type) as Promise<Workspace[]>)) {
-      await this._repairBaseEnvironments(workspace);
-      await this._fixMultipleCookieJars(workspace);
-      await this._applyApiSpecName(workspace);
-    }
+    // for (const workspace of await (this.find(models.workspace.type) as Promise<Workspace[]>)) {
+    //   await this._repairBaseEnvironments(workspace);
+    //   await this._fixMultipleCookieJars(workspace);
+    //   await this._applyApiSpecName(workspace);
+    // }
 
-    for (const gitRepository of await (this.find(models.gitRepository.type) as Promise<GitRepository[]>)) {
-      await this._fixOldGitURIs(gitRepository);
-    }
+    // for (const gitRepository of await (this.find(models.gitRepository.type) as Promise<GitRepository[]>)) {
+    //   await this._fixOldGitURIs(gitRepository);
+    // }
   }
 
   private readonly handleIpc = async<T extends keyof Database>(
@@ -306,7 +313,9 @@ export class DatabaseHost extends DatabaseCommon implements Database {
     }
 
     // Notify local listeners too
-    notifyChange(changes);
+    for (const callback of this.changeListeners) {
+      await callback(changes);
+    }
     // Notify remote listeners
     const isMainContext = process.type === 'browser';
     if (isMainContext) {
@@ -684,8 +693,4 @@ export class DatabaseHost extends DatabaseCommon implements Database {
   }
 }
 
-export let database = new DatabaseHost();
-
-export function resetDatabase() {
-  database = new DatabaseHost();
-}
+export const database = new DatabaseHost();

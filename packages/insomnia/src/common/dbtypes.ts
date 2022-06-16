@@ -32,7 +32,7 @@ export enum ChangeType {
 export type ModelQuery<T extends BaseModel> = Partial<Record<keyof T, SpecificQuery>>;
 
 export type ChangeBufferEvent = [
-  event: string,
+  event: ChangeType,
   doc: BaseModel,
   fromSync: boolean
 ];
@@ -40,6 +40,8 @@ export type ChangeBufferEvent = [
 export type ChangeListener = (changes: ChangeBufferEvent[]) => Promise<void> | void;
 
 export interface Database {
+  onChange(callback: ChangeListener): void;
+  offChange(callback: ChangeListener): void;
   all<T extends BaseModel = BaseModel>(type: string): Promise<T[]>;
   batchModifyDocs(op: Operation): Promise<void>;
   bufferChanges(millis?: number): Promise<number>;
@@ -60,12 +62,6 @@ export interface Database {
   upsert<T extends BaseModel = BaseModel>(doc: T, fromSync?: boolean): Promise<T>;
   withAncestors<T extends BaseModel = BaseModel>(doc: T | null, types?: string[]): Promise<T[]>;
   withDescendants<T extends BaseModel = BaseModel>(doc: T | null, stopType?: string | null): Promise<BaseModel[]>;
-}
-
-export class DatabaseCommon {
-  readonly CHANGE_INSERT = ChangeType.INSERT;
-  readonly CHANGE_UPDATE = ChangeType.UPDATE;
-  readonly CHANGE_REMOVE = ChangeType.REMOVE;
 }
 
 export async function docCreate<T extends BaseModel>(database: Database, type: string, ...patches: Partial<T>[]): Promise<T> {
