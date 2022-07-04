@@ -4,6 +4,7 @@ import React, { FC, useCallback, useEffect, useRef } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-tabs';
 import { useMount } from 'react-use';
 
+import { getAuthTypeName } from '../../../common/constants';
 import * as models from '../../../models';
 import { queryAllWorkspaceUrls } from '../../../models/helpers/query-all-workspace-urls';
 import type {
@@ -29,6 +30,8 @@ import { RenderedQueryString } from '../rendered-query-string';
 import { RequestUrlBar, RequestUrlBarHandle } from '../request-url-bar';
 import { Pane, paneBodyClasses, PaneHeader } from './pane';
 import { PlaceholderRequestPane } from './placeholder-request-pane';
+// import { WebSocketConnection, WebSocketConnectionTab } from './websocket-connection';
+import { WebSocketMessageEditor } from './websocket-message';
 
 interface Props {
   downloadPath: string | null;
@@ -151,6 +154,10 @@ export const RequestPane: FC<Props> = ({
   const urlHasQueryParameters = request.url.indexOf('?') >= 0;
   const uniqueKey = `${forceRefreshCounter}::${request._id}`;
 
+  // const isWebSocket = request.method === 'WebSocket';
+  // TODO: not sure if we need this for websockets
+  const hasAuthTab = request.method !== 'WebSocket';
+
   return (
     <Pane type="request">
       <PaneHeader>
@@ -177,15 +184,22 @@ export const RequestPane: FC<Props> = ({
       <Tabs className={classnames(paneBodyClasses, 'react-tabs')} forceRenderTabPanel>
         <TabList>
           <Tab tabIndex="=1">
+            {/* {isWebSocket ? <WebSocketMessageTab /> : ( */}
             <ContentTypeDropdown
               onChange={updateRequestMimeType}
             />
+            {/* )} */}
           </Tab>
-          <Tab tabIndex="=1">
-            <AuthDropdown
-              onChange={updateRequestAuthentication}
-            />
-          </Tab>
+          {hasAuthTab ? (
+            <Tab tabIndex="=1">
+              <AuthDropdown
+                onChange={updateRequestAuthentication}
+              >
+                {getAuthTypeName(request.authentication.type) || 'Auth'}
+                <i className="fa fa-caret-down space-left" />
+              </AuthDropdown>
+            </Tab>
+          ) : null}
           <Tab tabIndex="=1">
             <button>
               Query
@@ -198,6 +212,12 @@ export const RequestPane: FC<Props> = ({
               {numHeaders > 0 && <span className="bubble space-left">{numHeaders}</span>}
             </button>
           </Tab>
+          {/* {isWebSocket ? (
+            <Tab tabIndex="=1">
+              <WebSocketConnectionTab />
+            </Tab>
+          ) : null} */}
+
           <Tab tabIndex="=1">
             <button>
               Docs
@@ -209,8 +229,11 @@ export const RequestPane: FC<Props> = ({
             </button>
           </Tab>
         </TabList>
+
         <TabPanel key={uniqueKey} className="react-tabs__tab-panel editor-wrapper">
-          <BodyEditor
+          <WebSocketMessageEditor key={uniqueKey} />
+          {/* {isWebSocket ? <WebSocketMessageEditor key={uniqueKey} /> : ( */}
+          {/* <BodyEditor
             key={uniqueKey}
             handleUpdateRequestMimeType={updateRequestMimeType}
             request={request}
@@ -219,15 +242,18 @@ export const RequestPane: FC<Props> = ({
             settings={settings}
             onChange={updateRequestBody}
             onChangeHeaders={forceUpdateRequestHeaders}
-          />
+          /> */}
+          {/* )} */}
         </TabPanel>
-        <TabPanel className="react-tabs__tab-panel scrollable-container">
-          <div className="scrollable">
-            <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">
-              <AuthWrapper />
-            </ErrorBoundary>
-          </div>
-        </TabPanel>
+        {hasAuthTab ? (
+          <TabPanel className="react-tabs__tab-panel scrollable-container">
+            <div className="scrollable">
+              <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">
+                <AuthWrapper />
+              </ErrorBoundary>
+            </div>
+          </TabPanel>
+        ) : null}
         <TabPanel className="react-tabs__tab-panel query-editor">
           <div className="pad pad-bottom-sm query-editor__preview">
             <label className="label--small no-pad-top">Url Preview</label>
@@ -288,6 +314,13 @@ export const RequestPane: FC<Props> = ({
             </button>
           </div>
         </TabPanel>
+
+        {/* {isWebSocket ? (
+          <TabPanel key={`ws-connection::${uniqueKey}`} className="react-tabs__tab-panel tall scrollable">
+            <WebSocketConnection />
+          </TabPanel>
+        ) : null} */}
+
         <TabPanel key={`docs::${uniqueKey}`} className="react-tabs__tab-panel tall scrollable">
           {request.description ? (
             <div>
