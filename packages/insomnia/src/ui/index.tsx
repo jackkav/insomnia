@@ -78,3 +78,7 @@ ipcRenderer.on('update-available', () => {
   // you relaunch too soon it doesn't work the first time.
   setTimeout(showUpdateNotification, 1000 * 10);
 });
+
+ipcRenderer.on('asynchronous-reply', (event, arg) => {
+  console.log('recieved in renderer', arg);
+});
