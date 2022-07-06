@@ -38,18 +38,17 @@ export const registerWebsocketHandlers = () => {
     try {
       const ws = new WebSocket(options.url);
       ws.on('open', () => {
-        event.sender.send('asynchronous-reply', 'Connected to ' + options.url);
-
-        console.log('Connected to ' + options.url);
-        ws.send('test123');
         temporaryStateHack = ws;
+
+        event.sender.send('websocket.response', 'Connected to ' + options.url);
+        ws.send('remove this test message');
       });
-      ws.on('message', data => {
-        event.sender.send('asynchronous-reply', data);
-        console.log('received in main: ' + data);
+      ws.on('message', buffer => {
+        event.sender.send('websocket.response', buffer.toString());
       });
     } catch (e) {
       console.error(e);
+      throw e;
     }
   });
 
@@ -70,7 +69,7 @@ export const registerWebsocketHandlers = () => {
     const ws = temporaryStateHack;
     ws.close();
     ws.on('close', () => {
-      console.log('Disconnected from ', ws._url);
+      console.log('Disconnected from ', ws.url);
     });
     return 'success';
   });

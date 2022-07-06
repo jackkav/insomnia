@@ -79,6 +79,6 @@ ipcRenderer.on('update-available', () => {
   setTimeout(showUpdateNotification, 1000 * 10);
 });
 
-ipcRenderer.on('asynchronous-reply', (event, arg) => {
-  console.log('recieved in renderer', arg);
+ipcRenderer.on('websocket.response', (_, arg1) => {
+  console.log('recieved in renderer', arg1);
 });
