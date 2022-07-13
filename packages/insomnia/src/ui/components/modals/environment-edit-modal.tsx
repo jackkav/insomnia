@@ -7,7 +7,7 @@ import { Modal } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalFooter } from '../base/modal-footer';
 import { ModalHeader } from '../base/modal-header';
-import { EnvironmentEditor } from '../editors/environment-editor';
+import { type EnvironmentEditorHandle, EnvironmentEditor } from '../editors/environment-editor';
 
 interface Props {
   onChange: Function;
@@ -26,13 +26,13 @@ export class EnvironmentEditModal extends PureComponent<Props, State> {
   };
 
   modal: Modal | null = null;
-  _envEditor: EnvironmentEditor | null = null;
+  _envEditor: EnvironmentEditorHandle | null = null;
 
   _setModalRef(modal: Modal) {
     this.modal = modal;
   }
 
-  _setEditorRef(envEditor: EnvironmentEditor) {
+  _setEditorRef(envEditor: EnvironmentEditorHandle) {
     this._envEditor = envEditor;
   }
 

@@ -62,7 +62,7 @@ interface Props {
 
 // There was existing logic to also handle warnings, but it was removed in PR#2601 as there were no more warnings
 // to show. If warnings need to be added again, review git history to revert that particular change.
-interface EnvironmentEditorHandle {
+export interface EnvironmentEditorHandle {
   isValid: () => boolean;
   getValue: () => EnvironmentInfo | null;
 }

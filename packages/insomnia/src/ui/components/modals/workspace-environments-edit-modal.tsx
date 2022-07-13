@@ -20,7 +20,7 @@ import { ModalBody } from '../base/modal-body';
 import { ModalFooter } from '../base/modal-footer';
 import { ModalHeader } from '../base/modal-header';
 import { PromptButton } from '../base/prompt-button';
-import { EnvironmentEditor } from '../editors/environment-editor';
+import { type EnvironmentEditorHandle, EnvironmentEditor } from '../editors/environment-editor';
 import { HelpTooltip } from '../help-tooltip';
 import { Tooltip } from '../tooltip';
 const ROOT_ENVIRONMENT_NAME = 'Base Environment';
@@ -133,7 +133,7 @@ const SidebarList = SortableContainer<SidebarListProps>(
 
 @autoBindMethodsForReact(AUTOBIND_CFG)
 export class WorkspaceEnvironmentsEditModal extends PureComponent<Props, State> {
-  environmentEditorRef: EnvironmentEditor | null = null;
+  environmentEditorRef: EnvironmentEditorHandle | null = null;
   environmentColorInputRef: HTMLInputElement | null = null;
   saveTimeout: NodeJS.Timeout | null = null;
   modal: Modal | null = null;
@@ -153,7 +153,7 @@ export class WorkspaceEnvironmentsEditModal extends PureComponent<Props, State> 
     this.modal?.hide();
   }
 
-  _setEditorRef(environmentEditor: EnvironmentEditor) {
+  _setEditorRef(environmentEditor: EnvironmentEditorHandle) {
     this.environmentEditorRef = environmentEditor;
   }
 
