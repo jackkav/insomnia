@@ -1,8 +1,7 @@
-import { autoBindMethodsForReact } from 'class-autobind-decorator';
 import orderedJSON from 'json-order';
-import React, { PureComponent } from 'react';
+import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 
-import { AUTOBIND_CFG, JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '../../../common/constants';
+import {  JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '../../../common/constants';
 import { NUNJUCKS_TEMPLATE_GLOBAL_PROPERTY_NAME } from '../../../templating';
 import { CodeEditor,  UnconnectedCodeEditor } from '../codemirror/code-editor';
 
@@ -63,61 +62,18 @@ interface Props {
 
 // There was existing logic to also handle warnings, but it was removed in PR#2601 as there were no more warnings
 // to show. If warnings need to be added again, review git history to revert that particular change.
-interface State {
-  error: string | null;
+interface EnvironmentEditorHandle {
+  isValid: () => boolean;
+  getValue: () => EnvironmentInfo | null;
 }
+export const EnvironmentEditor = forwardRef<EnvironmentEditorHandle, Props>(({ environmentInfo, didChange, ...rest }, ref) => {
+  const _editor = useRef<UnconnectedCodeEditor>(null);
+  const [error, setError] = useState<string | null>(null);
 
-@autoBindMethodsForReact(AUTOBIND_CFG)
-export class EnvironmentEditor extends PureComponent<Props, State> {
-  _editor: UnconnectedCodeEditor | null = null;
-
-  state: State = {
-    error: null,
-  };
-
-  _handleChange() {
-    let error: string | null = null;
-    let value: EnvironmentInfo | null = null;
-
-    // Check for JSON parse errors
-    try {
-      value = this.getValue();
-    } catch (err) {
-      error = err.message;
-    }
-
-    // Check for invalid key names
-    if (value && value.object) {
-      // Check root and nested properties
-      const err = checkNestedKeys(value.object);
-      if (err) {
-        error = err;
-      }
-    }
-
-    // Call this last in case component unmounted
-    if (this.state.error !== error) {
-      this.setState(
-        {
-          error,
-        },
-        () => {
-          this.props.didChange();
-        },
-      );
-    } else {
-      this.props.didChange();
-    }
-  }
-
-  _setEditorRef(editor: UnconnectedCodeEditor) {
-    this._editor = editor;
-  }
-
-  getValue(): EnvironmentInfo | null {
-    if (this._editor) {
+  const getValue = useCallback((): EnvironmentInfo | null => {
+    if (_editor.current) {
       const data = orderedJSON.parse(
-        this._editor.getValue(),
+        _editor.current.getValue(),
         JSON_ORDER_PREFIX,
         JSON_ORDER_SEPARATOR,
       );
@@ -125,39 +81,54 @@ export class EnvironmentEditor extends PureComponent<Props, State> {
         object: data.object,
         propertyOrder: data.map || null,
       };
-    } else {
-      return null;
     }
-  }
+    return null;
+  }, []);
 
-  isValid() {
-    return !this.state.error;
-  }
+  useImperativeHandle(ref, () => ({ isValid:() => !error, getValue }), [error, getValue]);
 
-  render() {
-    const {
-      environmentInfo,
-      ...props
-    } = this.props;
-    const { error } = this.state;
-    const defaultValue = orderedJSON.stringify(
-      environmentInfo.object,
-      environmentInfo.propertyOrder || null,
-      JSON_ORDER_SEPARATOR,
-    );
-    return (
-      <div className="environment-editor">
-        <CodeEditor
-          ref={this._setEditorRef}
-          autoPrettify
-          enableNunjucks
-          onChange={this._handleChange}
-          defaultValue={defaultValue}
-          mode="application/json"
-          {...props}
-        />
-        {error && <p className="notice error margin">{error}</p>}
-      </div>
-    );
-  }
-}
+  const onChange = useCallback(() => {
+    let value: EnvironmentInfo | null = null;
+    // Check for JSON parse errors
+    try {
+      value = getValue();
+    } catch (err) {
+      setError(err.message);
+      didChange();
+      return;
+    }
+    // Check for invalid key names
+    if (value && value.object) {
+      // Check root and nested properties
+      const err = checkNestedKeys(value.object);
+      if (err) {
+        setError(err);
+        didChange();
+        return;
+      }
+    }
+    // Call this last in case component unmounted
+    didChange();
+  }, [didChange, getValue]);
+
+  const defaultValue = orderedJSON.stringify(
+    environmentInfo.object,
+    environmentInfo.propertyOrder || null,
+    JSON_ORDER_SEPARATOR,
+  );
+  return (
+    <div className="environment-editor">
+      <CodeEditor
+        ref={_editor}
+        autoPrettify
+        enableNunjucks
+        onChange={onChange}
+        defaultValue={defaultValue}
+        mode="application/json"
+        {...rest}
+      />
+      {error && <p className="notice error margin">{error}</p>}
+    </div>
+  );
+});
+EnvironmentEditor.displayName = 'EnvironmentEditor';
