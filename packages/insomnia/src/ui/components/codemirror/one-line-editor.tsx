@@ -1,10 +1,8 @@
-import { autoBindMethodsForReact } from 'class-autobind-decorator';
 import classnames from 'classnames';
-import React, { Fragment, PureComponent } from 'react';
+import React, { forwardRef, Fragment, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 
-import { AUTOBIND_CFG } from '../../../common/constants';
-import { CodeEditor,  CodeEditorOnChange, UnconnectedCodeEditor } from './code-editor';
+import { CodeEditor, CodeEditorOnChange, UnconnectedCodeEditor } from './code-editor';
 const MODE_INPUT = 'input';
 const MODE_EDITOR = 'editor';
 const TYPE_TEXT = 'text';
@@ -28,212 +26,208 @@ interface Props {
   readOnly?: boolean;
 }
 
-interface State {
-  mode: string;
+export interface OneLineEditorHandle {
+  focus: () => void;
+  selectAll: () => void;
+  getValue: () => string | undefined;
+  getSelectionStart: () => number | null | undefined;
+  getSelectionEnd: () => number | null | undefined;
 }
+export const OneLineEditorFC = forwardRef<OneLineEditorHandle, Props>((props, ref) => {
+  const {
+    id,
+    defaultValue,
+    className,
+    onChange,
+    placeholder,
+    onPaste,
+    getAutocompleteConstants,
+    mode: syntaxMode,
+    type: originalType,
+  } = props;
+  let derivedMode;
 
-@autoBindMethodsForReact(AUTOBIND_CFG)
-export class OneLineEditor extends PureComponent<Props, State> {
-  _editor: UnconnectedCodeEditor | null = null;
-  _input: HTMLInputElement | null = null;
-  _mouseEnterTimeout: NodeJS.Timeout | null = null;
+  if (props.forceInput) {
+    derivedMode = MODE_INPUT;
+  } else if (props.forceEditor) {
+    derivedMode = MODE_EDITOR;
+  } else if (_mayContainNunjucks(props.defaultValue)) {
+    derivedMode = MODE_EDITOR;
+  } else {
+    derivedMode = MODE_INPUT;
+  }
+  const [mode, setMode] = useState(derivedMode);
+  const editorRef = useRef<UnconnectedCodeEditor>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  constructor(props: Props) {
-    super(props);
-    let mode;
-
-    if (props.forceInput) {
-      mode = MODE_INPUT;
-    } else if (props.forceEditor) {
-      mode = MODE_EDITOR;
-    } else if (this._mayContainNunjucks(props.defaultValue)) {
-      mode = MODE_EDITOR;
+  const getValue = useCallback(() => {
+    if (mode === MODE_EDITOR) {
+      return editorRef.current?.getValue();
     } else {
-      mode = MODE_INPUT;
+      return inputRef.current?.value;
     }
+  }, [mode]);
 
-    this.state = {
-      mode,
-    };
-  }
-
-  focus() {
-    this._input?.focus();
-  }
-
-  focusEnd() {
-    this.focus();
-  }
-
-  selectAll() {
-    if (this.state.mode === MODE_EDITOR) {
-      this._editor?.selectAll();
-    } else {
-      this._input?.select();
-    }
-  }
-
-  getValue() {
-    if (this.state.mode === MODE_EDITOR) {
-      return this._editor?.getValue();
-    } else {
-      return this._input?.value;
-    }
-  }
-
-  getSelectionStart() {
-    if (this._editor) {
-      return this._editor?.getSelectionStart();
-    } else {
-      console.warn('Tried to get selection start of one-line-editor when <input>');
-      return this._input?.value.length;
-    }
-  }
-
-  getSelectionEnd() {
-    if (this._editor) {
-      return this._editor?.getSelectionEnd();
-    } else {
-      console.warn('Tried to get selection end of one-line-editor when <input>');
-      return this._input?.value.length;
-    }
-  }
-
-  componentDidMount() {
-    document.body.addEventListener('mousedown', this._handleDocumentMousedown);
-  }
-
-  componentWillUnmount() {
-    document.body.removeEventListener('mousedown', this._handleDocumentMousedown);
-  }
-
-  _handleDocumentMousedown(event: MouseEvent) {
-    if (!this._editor) {
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current?.focus();
+    },
+    selectAll: () => {
+      if (mode === MODE_EDITOR) {
+        editorRef.current?.selectAll();
+      } else {
+        inputRef.current?.select();
+      }
+    },
+    getSelectionStart: () => {
+      if (editorRef.current) {
+        return editorRef.current?.getSelectionStart();
+      } else {
+        console.warn('Tried to get selection start of one-line-editor when <input>');
+        return inputRef.current?.value.length;
+      }
+    },
+    getSelectionEnd: () => {
+      if (editorRef.current) {
+        return editorRef.current?.getSelectionEnd();
+      } else {
+        console.warn('Tried to get selection end of one-line-editor when <input>');
+        return inputRef.current?.value.length;
+      }
+    },
+    getValue,
+  }), [getValue, mode]);
+  useEffect(() => {
+    document.body.addEventListener('mousedown', _handleDocumentMousedown);
+    return () => document.body.removeEventListener('mousedown', _handleDocumentMousedown);
+  }, []);
+  function _handleDocumentMousedown(event: MouseEvent) {
+    if (!editorRef.current) {
       return;
     }
 
     // Clear the selection if mousedown happens outside the input so we act like
     // a regular <input>
     // NOTE: Must be "mousedown", not "click" because "click" triggers on selection drags
-    const node = ReactDOM.findDOMNode(this._editor);
+    const node = ReactDOM.findDOMNode(editorRef.current);
     // @ts-expect-error -- TSCONVERSION
     const clickWasOutsideOfComponent = !node.contains(event.target);
 
     if (clickWasOutsideOfComponent) {
-      this._editor?.clearSelection();
+      editorRef.current?.clearSelection();
     }
   }
 
-  _handleInputDragEnter() {
-    this._convertToEditorPreserveFocus();
+  function _handleInputDragEnter() {
+    _convertToEditorPreserveFocus();
   }
 
-  _handleInputMouseEnter() {
+  function _handleInputMouseEnter() {
     // Convert to editor when user hovers mouse over input
 
     /*
      * NOTE: we're doing it in a timeout because we don't want to convert if the
      * mouse goes in an out right away.
      */
-    this._mouseEnterTimeout = setTimeout(this._convertToEditorPreserveFocus, 100);
+    // _mouseEnterTimeout = setTimeout(_convertToEditorPreserveFocus, 100);
   }
 
-  _handleInputMouseLeave() {
-    if (this._mouseEnterTimeout !== null) {
-      clearTimeout(this._mouseEnterTimeout);
-    }
+  function _handleInputMouseLeave() {
+    // if (_mouseEnterTimeout !== null) {
+    //   clearTimeout(_mouseEnterTimeout);
+    // }
   }
 
-  _handleEditorMouseLeave() {
-    this._convertToInputIfNotFocused();
+  function _handleEditorMouseLeave() {
+    _convertToInputIfNotFocused();
   }
 
-  _handleEditorFocus(event: FocusEvent) {
+  function _handleEditorFocus(event: FocusEvent) {
     // TODO: unclear why this is missing in TypeScript DOM.
     const focusedFromTabEvent = !!(event as any).sourceCapabilities;
 
     if (focusedFromTabEvent) {
-      this._editor?.focusEnd();
+      editorRef.current?.focusEnd();
     }
 
-    if (!this._editor) {
-      console.warn('Tried to focus editor when it was not mounted', this);
+    if (!editorRef.current) {
+      console.warn('Tried to focus editor when it was not mounted');
       return;
     }
 
     // Set focused state
-    this._editor?.setAttribute('data-focused', 'on');
+    editorRef.current?.setAttribute('data-focused', 'on');
 
-    this.props.onFocus?.(event);
+    props.onFocus?.(event);
   }
 
-  _handleInputFocus(event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement, Element>) {
+  function _handleInputFocus(event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement, Element>) {
     // If we're focusing the whole thing, blur the input. This happens when
     // the user tabs to the field.
-    const start = this._input?.selectionStart;
+    const start = inputRef.current?.selectionStart;
 
-    const end = this._input?.selectionEnd;
+    const end = inputRef.current?.selectionEnd;
 
     const focusedFromTabEvent = start === 0 && end === event.target.value.length;
 
     if (focusedFromTabEvent) {
-      this._input?.focus();
+      inputRef.current?.focus();
 
       // Also convert to editor if we tabbed to it. Just in case the user
       // needs an editor
-      this._convertToEditorPreserveFocus();
+      _convertToEditorPreserveFocus();
     }
 
     // Set focused state
-    this._input?.setAttribute('data-focused', 'on');
+    inputRef.current?.setAttribute('data-focused', 'on');
 
     // Also call the regular callback
-    this.props.onFocus?.(event);
+    props.onFocus?.(event);
   }
 
-  _handleInputChange(value: string) {
-    this._convertToEditorPreserveFocus();
+  function _handleInputChange(value: string) {
+    _convertToEditorPreserveFocus();
 
-    this.props.onChange?.(value);
+    props.onChange?.(value);
   }
 
-  _handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (this.props.onKeyDown) {
-      this.props.onKeyDown(event, event.currentTarget.value);
+  function _handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (props.onKeyDown) {
+      props.onKeyDown(event, event.currentTarget.value);
     }
   }
 
-  _handleInputBlur(event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement>) {
+  function _handleInputBlur(event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement>) {
     // Set focused state
-    this._input?.removeAttribute('data-focused');
+    inputRef.current?.removeAttribute('data-focused');
 
-    this.props.onBlur?.(event);
+    props.onBlur?.(event);
   }
 
-  _handleEditorBlur(event: FocusEvent) {
+  function _handleEditorBlur(event: FocusEvent) {
     // Editor was already removed from the DOM, so do nothing
-    if (!this._editor) {
+    if (!editorRef.current) {
       return;
     }
 
     // Set focused state
-    this._editor?.removeAttribute('data-focused');
+    editorRef.current?.removeAttribute('data-focused');
 
-    if (!this.props.forceEditor) {
+    if (!props.forceEditor) {
       // Convert back to input sometime in the future.
       // NOTE: this was originally added because the input would disappear if
       // the user tabbed away very shortly after typing, but it's actually a pretty
       // good feature.
       setTimeout(() => {
-        this._convertToInputIfNotFocused();
+        _convertToInputIfNotFocused();
       }, 2000);
     }
 
-    this.props.onBlur?.(event);
+    props.onBlur?.(event);
   }
 
   // @TODO Refactor this event handler. The way we search for a parent form node is not stable.
-  _handleKeyDown(event: KeyboardEvent) {
+  function _handleKeyDown(event: KeyboardEvent) {
     // submit form if needed
     if (event.keyCode === 13) {
       // TODO: This can be NULL, or not an HTMLElement.
@@ -252,31 +246,31 @@ export class OneLineEditor extends PureComponent<Props, State> {
       }
     }
 
-    this.props.onKeyDown?.(event, this.getValue());
+    props.onKeyDown?.(event, getValue());
   }
 
-  _convertToEditorPreserveFocus() {
-    if (this.state.mode !== MODE_INPUT || this.props.forceInput) {
+  function _convertToEditorPreserveFocus() {
+    if (mode !== MODE_INPUT || props.forceInput) {
       return;
     }
 
-    if (!this._input) {
+    if (!inputRef.current) {
       return;
     }
 
-    if (document.activeElement === this._input) {
-      const start = this._input?.selectionStart;
-      const end = this._input?.selectionEnd;
+    if (document.activeElement === inputRef.current) {
+      const start = inputRef.current?.selectionStart;
+      const end = inputRef.current?.selectionEnd;
       if (start === null || end === null) {
         return;
       }
 
       // Wait for the editor to swap and restore cursor position
       const check = () => {
-        if (this._editor) {
-          this._editor?.focus();
+        if (editorRef.current) {
+          editorRef.current?.focus();
 
-          this._editor?.setSelection(start, end, 0, 0);
+          editorRef.current?.setSelection(start, end, 0, 0);
         } else {
           setTimeout(check, 40);
         }
@@ -285,39 +279,24 @@ export class OneLineEditor extends PureComponent<Props, State> {
       // Tell the component to show the editor
       setTimeout(check);
     }
-
-    this.setState({
-      mode: MODE_EDITOR,
-    });
+    setMode(MODE_EDITOR);
   }
 
-  _convertToInputIfNotFocused() {
-    if (this.state.mode === MODE_INPUT || this.props.forceEditor) {
+  function _convertToInputIfNotFocused() {
+    if (mode === MODE_INPUT || props.forceEditor) {
       return;
     }
 
-    if (!this._editor || this._editor?.hasFocus()) {
+    if (!editorRef.current || editorRef.current?.hasFocus()) {
       return;
     }
 
-    if (this._mayContainNunjucks(this.getValue() || '')) {
+    if (_mayContainNunjucks(getValue() || '')) {
       return;
     }
-
-    this.setState({
-      mode: MODE_INPUT,
-    });
+    setMode(MODE_INPUT);
   }
-
-  _setEditorRef(editor: UnconnectedCodeEditor) {
-    this._editor = editor;
-  }
-
-  _setInputRef(input: HTMLInputElement) {
-    this._input = input;
-  }
-
-  _mayContainNunjucks(text: string) {
+  function _mayContainNunjucks(text: string) {
     // Not sure, but sometimes this isn't a string
     if (typeof text !== 'string') {
       return false;
@@ -327,75 +306,62 @@ export class OneLineEditor extends PureComponent<Props, State> {
     return !!text.match(NUNJUCKS_REGEX);
   }
 
-  render() {
-    const {
-      id,
-      defaultValue,
-      className,
-      onChange,
-      placeholder,
-      onPaste,
-      getAutocompleteConstants,
-      mode: syntaxMode,
-      type: originalType,
-    } = this.props;
-    const { mode } = this.state;
-    const type = originalType || TYPE_TEXT;
-    const showEditor = mode === MODE_EDITOR;
+  const type = originalType || TYPE_TEXT;
+  const showEditor = mode === MODE_EDITOR;
 
-    if (showEditor) {
-      return (
-        <Fragment>
-          <CodeEditor
-            ref={this._setEditorRef}
-            defaultTabBehavior
-            hideLineNumbers
-            hideScrollbars
-            noMatchBrackets
-            noStyleActiveLine
-            noLint
-            singleLine
-            ignoreEditorFontSettings
-            enableNunjucks
-            autoCloseBrackets={false}
-            tabIndex={0}
-            id={id}
-            type={type}
-            mode={syntaxMode}
-            placeholder={placeholder}
-            onPaste={onPaste}
-            onBlur={this._handleEditorBlur}
-            onKeyDown={this._handleKeyDown}
-            onFocus={this._handleEditorFocus}
-            onMouseLeave={this._handleEditorMouseLeave}
-            onChange={onChange}
-            getAutocompleteConstants={getAutocompleteConstants}
-            className={classnames('editor--single-line', className)}
-            defaultValue={defaultValue}
-          />
-        </Fragment>
-      );
-    } else {
-      return (
-        <input
-          ref={this._setInputRef}
+  if (showEditor) {
+    return (
+      <Fragment>
+        <CodeEditor
+          ref={editorRef}
+          defaultTabBehavior
+          hideLineNumbers
+          hideScrollbars
+          noMatchBrackets
+          noStyleActiveLine
+          noLint
+          singleLine
+          ignoreEditorFontSettings
+          enableNunjucks
+          autoCloseBrackets={false}
+          tabIndex={0}
           id={id}
           type={type}
-          className={className}
-          style={{
-            width: '100%',
-          }}
+          mode={syntaxMode}
           placeholder={placeholder}
+          onPaste={onPaste}
+          onBlur={_handleEditorBlur}
+          onKeyDown={_handleKeyDown}
+          onFocus={_handleEditorFocus}
+          onMouseLeave={_handleEditorMouseLeave}
+          onChange={onChange}
+          getAutocompleteConstants={getAutocompleteConstants}
+          className={classnames('editor--single-line', className)}
           defaultValue={defaultValue}
-          onBlur={this._handleInputBlur}
-          onChange={event => this._handleInputChange(event.target.value)}
-          onMouseEnter={this._handleInputMouseEnter}
-          onMouseLeave={this._handleInputMouseLeave}
-          onDragEnter={this._handleInputDragEnter}
-          onFocus={this._handleInputFocus}
-          onKeyDown={this._handleInputKeyDown}
         />
-      );
-    }
+      </Fragment>
+    );
+  } else {
+    return (
+      <input
+        ref={inputRef}
+        id={id}
+        type={type}
+        className={className}
+        style={{
+          width: '100%',
+        }}
+        placeholder={placeholder}
+        defaultValue={defaultValue}
+        onBlur={_handleInputBlur}
+        onChange={event => _handleInputChange(event.target.value)}
+        onMouseEnter={_handleInputMouseEnter}
+        onMouseLeave={_handleInputMouseLeave}
+        onDragEnter={_handleInputDragEnter}
+        onFocus={_handleInputFocus}
+        onKeyDown={_handleInputKeyDown}
+      />
+    );
   }
-}
+});
+OneLineEditorFC.displayName = 'OneLineEditorFC';
