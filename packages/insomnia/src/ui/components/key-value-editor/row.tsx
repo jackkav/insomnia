@@ -136,12 +136,10 @@ class KeyValueEditorRowInternal extends PureComponent<Props, State> {
 
       // Insert the pasted text into the current selection.
       // Unfortunately, this is the easiest way to do this.
-      const currentValue = this._valueInput?.getValue();
+      const currentValue = this._valueInput?.getValue() || '';
 
-      // @ts-expect-error -- TSCONVERSION
-      const prefix = currentValue.slice(0, this._valueInput?.getSelectionStart());
-      // @ts-expect-error -- TSCONVERSION
-      const suffix = currentValue.slice(this._valueInput?.getSelectionEnd());
+      const prefix = currentValue.slice(0, this._valueInput?.getSelectionStart() || 0);
+      const suffix = currentValue.slice(this._valueInput?.getSelectionEnd() || 0);
       const finalValue = `${prefix}${value}${suffix}`;
 
       // Update type and value

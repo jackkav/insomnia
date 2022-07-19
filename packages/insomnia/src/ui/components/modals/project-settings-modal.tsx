@@ -10,7 +10,6 @@ import { isRemoteProject, projectHasSettings } from '../../../models/project';
 import { RootState } from '../../redux/modules';
 import * as projectActions from '../../redux/modules/project';
 import { selectActiveProject } from '../../redux/selectors';
-import { DebouncedInput } from '../base/debounced-input';
 import { Modal } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalHeader } from '../base/modal-header';
@@ -74,13 +73,11 @@ class ProjectSettingsModal extends PureComponent<Props> {
                 </>
               )}
               {!isRemote && (
-                <DebouncedInput
-                // @ts-expect-error -- TSCONVERSION props are spread into an input element
+                <input
                   type="text"
-                  delay={500}
                   placeholder={`My ${strings.project.singular}`}
                   defaultValue={project.name}
-                  onChange={this._handleRename}
+                  onChange={e => this._handleRename(e.target.value)}
                 />
               )}
             </label>

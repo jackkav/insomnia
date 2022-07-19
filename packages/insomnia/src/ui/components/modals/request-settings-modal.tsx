@@ -11,7 +11,6 @@ import type { BaseRequest, Request } from '../../../models/request';
 import { isWorkspace, Workspace } from '../../../models/workspace';
 import { RootState } from '../../redux/modules';
 import { selectWorkspacesForActiveProject } from '../../redux/selectors';
-import { DebouncedInput } from '../base/debounced-input';
 import { Modal } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalHeader } from '../base/modal-header';
@@ -433,13 +432,11 @@ export class UnconnectedRequestSettingsModal extends PureComponent<Props, State>
           <label>
             Name{' '}
             <span className="txt-sm faint italic">(also rename by double-clicking in sidebar)</span>
-            <DebouncedInput
-              delay={500}
-              // @ts-expect-error -- TSCONVERSION props expand into an input but are difficult to type
+            <input
               type="text"
               placeholder={request.url || 'My Request'}
               defaultValue={request.name}
-              onChange={this._handleNameChange}
+              onChange={e => this._handleNameChange(e.target.value)}
             />
           </label>
         </div>

@@ -57,7 +57,7 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(({
 
   const focusInput = useCallback(() => {
     if (inputRef.current) {
-      inputRef.current.focus(true);
+      inputRef.current.focus();
     }
   }, [inputRef]);
 

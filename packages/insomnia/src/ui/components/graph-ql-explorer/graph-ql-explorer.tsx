@@ -7,7 +7,6 @@ import { createRef } from 'react';
 import { AUTOBIND_CFG } from '../../../common/constants';
 import { hotKeyRefs } from '../../../common/hotkeys';
 import { executeHotKey } from '../../../common/hotkeys-listener';
-import { DebouncedInput } from '../base/debounced-input';
 import { KeydownBinder } from '../keydown-binder';
 import { GraphQLExplorerEnum } from './graph-ql-explorer-enum';
 import { GraphQLExplorerField } from './graph-ql-explorer-field';
@@ -73,8 +72,6 @@ interface State extends HistoryItem {
   filter: string;
 }
 
-const SEARCH_UPDATE_DELAY_IN_MS = 300;
-
 @autoBindMethodsForReact(AUTOBIND_CFG)
 export class GraphQLExplorer extends PureComponent<Props, State> {
   state: State = {
@@ -84,7 +81,7 @@ export class GraphQLExplorer extends PureComponent<Props, State> {
     filter: '',
   };
 
-  _searchInput = createRef<DebouncedInput>();
+  _searchInput = createRef<HTMLInputElement>();
 
   _handleKeydown(event: KeyboardEvent) {
     executeHotKey(event, hotKeyRefs.GRAPHQL_EXPLORER_FOCUS_FILTER, () => {
@@ -235,18 +232,19 @@ export class GraphQLExplorer extends PureComponent<Props, State> {
     return (
       <div className="graphql-explorer__search">
         <div className="form-control form-control--outlined form-control--btn-right">
-          <DebouncedInput
+          <input
             ref={this._searchInput}
-            onChange={this._handleFilterChange}
+            onChange={event => this._handleFilterChange(event.target.value)}
             placeholder="Search the docs..."
-            delay={SEARCH_UPDATE_DELAY_IN_MS}
-            initialValue={this.state.filter}
+            defaultValue={this.state.filter}
           />
           {this.state.filter && (
             <button
               className="form-control__right"
               onClick={() => {
-                this._searchInput.current?.setValue('');
+                if (this._searchInput.current) {
+                  this._searchInput.current.value = '';
+                }
                 this._handleFilterChange('');
               }}
             >

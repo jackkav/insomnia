@@ -9,7 +9,6 @@ import type { RequestGroup } from '../../../models/request-group';
 import type { Workspace } from '../../../models/workspace';
 import { RootState } from '../../redux/modules';
 import { selectWorkspacesForActiveProject } from '../../redux/selectors';
-import { DebouncedInput } from '../base/debounced-input';
 import { Modal } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalHeader } from '../base/modal-header';
@@ -295,13 +294,11 @@ export class UnconnectedRequestGroupSettingsModal extends React.PureComponent<Pr
         <div className="form-control form-control--outlined">
           <label>
             Name
-            <DebouncedInput
-              delay={500}
-              // @ts-expect-error -- TSCONVERSION props expand into an input but are difficult to type
+            <input
               type="text"
               placeholder={requestGroup.name || 'My Folder'}
               defaultValue={requestGroup.name}
-              onChange={this._handleNameChange}
+              onChange={e => this._handleNameChange(e.target.value)}
             />
           </label>
         </div>

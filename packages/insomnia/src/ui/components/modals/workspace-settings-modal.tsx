@@ -13,7 +13,6 @@ import * as models from '../../../models/index';
 import type { Workspace } from '../../../models/workspace';
 import { RootState } from '../../redux/modules';
 import { selectActiveWorkspaceName } from '../../redux/selectors';
-import { DebouncedInput } from '../base/debounced-input';
 import { FileInputButton } from '../base/file-input-button';
 import { Modal } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
@@ -315,13 +314,11 @@ export class UnconnectedWorkspaceSettingsModal extends PureComponent<Props, Stat
             <div className="form-control form-control--outlined">
               <label>
                 Name
-                <DebouncedInput
-                  // @ts-expect-error -- TSCONVERSION props are spread into an input element
+                <input
                   type="text"
-                  delay={500}
                   placeholder="Awesome API"
                   defaultValue={activeWorkspaceName}
-                  onChange={this._handleRename}
+                  onChange={e => this._handleRename(e.target.value)}
                 />
               </label>
             </div>

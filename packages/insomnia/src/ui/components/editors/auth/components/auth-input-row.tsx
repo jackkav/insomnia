@@ -38,7 +38,6 @@ export const AuthInputRow: FC<Props> = ({ label, getAutocompleteConstants, prope
         type={isMasked ? 'password' : 'text'}
         mode={mode}
         onChange={onChange}
-        disabled={authentication.disabled}
         defaultValue={authentication[property] || ''}
         getAutocompleteConstants={getAutocompleteConstants}
       />
