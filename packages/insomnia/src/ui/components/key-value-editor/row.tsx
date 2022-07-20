@@ -1,6 +1,6 @@
 // eslint-disable-next-line filenames/match-exported
 import classnames from 'classnames';
-import React, { FC, forwardRef, ForwardRefRenderFunction, useImperativeHandle, useRef, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { ConnectDragPreview, ConnectDragSource, ConnectDropTarget, DragSource, DropTarget, DropTargetMonitor } from 'react-dnd';
 import ReactDOM from 'react-dom';
 
@@ -46,7 +46,6 @@ interface Props {
   onBlurName?: (pair: Pair, event: FocusEvent | React.FocusEvent<Element, Element>) => void;
   onBlurValue?: (pair: Pair, event: FocusEvent | React.FocusEvent<Element, Element>) => void;
   onBlurDescription?: (pair: Pair, event: FocusEvent | React.FocusEvent<Element, Element>) => void;
-  enableNunjucks?: boolean;
   handleGetAutocompleteNameConstants?: AutocompleteHandler;
   handleGetAutocompleteValueConstants?: AutocompleteHandler;
   namePlaceholder?: string;
@@ -64,7 +63,7 @@ interface Props {
   renderLeftIcon?: Function;
   // For drag-n-drop
   connectDragSource?: ConnectDragSource;
-  connectDragPreview?: ConnectDragPreview;
+  // connectDragPreview?: ConnectDragPreview;
   connectDropTarget?: ConnectDropTarget;
   isDragging?: boolean;
   isDraggingOver?: boolean;
@@ -77,7 +76,41 @@ interface KeyValueEditorRowInternalHandle {
   setDragDirection: (d: DragDirection) => void;
 }
 
-const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInternalHandle, Props>((props, ref) => {
+const KeyValueEditorRowInternal = forwardRef<KeyValueEditorRowInternalHandle, Props>(({
+  allowFile,
+  allowMultiline,
+  className,
+  connectDragPreview,
+  connectDragSource,
+  connectDropTarget,
+  descriptionPlaceholder,
+  displayDescription,
+  forceInput,
+  hideButtons,
+  isDragging,
+  isDraggingOver,
+  namePlaceholder,
+  noDelete,
+  noDropZone,
+  pair,
+  valueInputType,
+  valuePlaceholder,
+  readOnly,
+  renderLeftIcon,
+  sortable,
+  onChange,
+  onDelete,
+  onFocusDescription,
+  onFocusName,
+  onFocusValue,
+  onBlurDescription,
+  onBlurName,
+  onBlurValue,
+  onKeyDown,
+  handleGetAutocompleteNameConstants,
+  handleGetAutocompleteValueConstants,
+}, ref) => {
+  const { enabled: enableNunjucks } = useNunjucksEnabled();
   const nameInputRef = useRef<OneLineEditor>(null);
   const valueInputRef = useRef<OneLineEditor>(null);
   const descriptionInputRef = useRef<OneLineEditor>(null);
@@ -102,12 +135,11 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
   }), [setDragDirection]);
 
   function _sendChange(patch: Partial<Pair>) {
-    const pair = Object.assign({}, props.pair, patch);
-    props.onChange?.(pair);
+    onChange?.(Object.assign({}, pair, patch));
   }
 
   function _handleValuePaste(event: ClipboardEvent) {
-    if (!props.allowMultiline) {
+    if (!allowMultiline) {
       return;
     }
 
@@ -157,7 +189,7 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
   function _handleTypeChange(def: Partial<Pair>) {
     // Remove newlines if converting to text
     // WARNING: props should never be overwritten!
-    let value = props.pair.value || '';
+    let value = pair.value || '';
 
     if (def.type === 'text' && !def.multiline && value.includes('\n')) {
       value = value.replace(/\n/g, '');
@@ -171,59 +203,54 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
   }
 
   function _handleFocusName(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onFocusName(props.pair, event);
+    onFocusName(pair, event);
   }
 
   function _handleFocusValue(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onFocusValue(props.pair, event);
+    onFocusValue(pair, event);
   }
 
   function _handleFocusDescription(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onFocusDescription(props.pair, event);
+    onFocusDescription(pair, event);
   }
 
   function _handleBlurName(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onBlurName?.(props.pair, event);
+    onBlurName?.(pair, event);
   }
 
   function _handleBlurValue(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onBlurValue?.(props.pair, event);
+    onBlurValue?.(pair, event);
   }
 
   function _handleBlurDescription(event: FocusEvent | React.FocusEvent<Element, Element>) {
-    props.onBlurDescription?.(props.pair, event);
+    onBlurDescription?.(pair, event);
   }
 
   function _handleDelete() {
-    props.onDelete?.(props.pair);
+    onDelete?.(pair);
   }
 
   function _handleKeyDown(event: KeyboardEvent | React.KeyboardEvent<Element>, value?: any) {
-    props.onKeyDown?.(props.pair, event, value);
+    onKeyDown?.(pair, event, value);
   }
 
   function _handleAutocompleteNames() {
-    const { handleGetAutocompleteNameConstants } = props;
-
     if (handleGetAutocompleteNameConstants) {
-      return handleGetAutocompleteNameConstants(props.pair);
+      return handleGetAutocompleteNameConstants(pair);
     }
 
     return [];
   }
 
   function _handleAutocompleteValues() {
-    const { handleGetAutocompleteValueConstants } = props;
-
     if (handleGetAutocompleteValueConstants) {
-      return handleGetAutocompleteValueConstants(props.pair);
+      return handleGetAutocompleteValueConstants(pair);
     }
 
     return [];
   }
 
   function _handleEditMultiline() {
-    const { pair, enableNunjucks } = props;
     showModal(CodePromptModal, {
       submitName: 'Done',
       title: `Edit ${pair.name}`,
@@ -240,29 +267,6 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
       },
     });
   }
-  const {
-    allowFile,
-    allowMultiline,
-    className,
-    connectDragPreview,
-    connectDragSource,
-    connectDropTarget,
-    descriptionPlaceholder,
-    displayDescription,
-    forceInput,
-    hideButtons,
-    isDragging,
-    isDraggingOver,
-    namePlaceholder,
-    noDelete,
-    noDropZone,
-    pair,
-    valueInputType,
-    valuePlaceholder,
-    readOnly,
-    renderLeftIcon,
-    sortable,
-  } = props;
   const classes = classnames(className, {
     'key-value-editor__row-wrapper': true,
     'key-value-editor__row-wrapper--dragging': isDragging,
@@ -271,23 +275,18 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
     'key-value-editor__row-wrapper--disabled': pair.disabled,
   });
 
-  let handle: ConnectDragSource | JSX.Element | undefined | null = null;
-
-  if (sortable) {
-    handle = renderLeftIcon ? (
-      <div className="key-value-editor__drag">{renderLeftIcon()}</div>
-    ) : (
-      connectDragSource?.(
-        <div className="key-value-editor__drag">
-          <i className={'fa ' + (hideButtons ? 'fa-empty' : 'fa-reorder')} />
-        </div>,
-      )
-    );
-  }
-
   const row = (
     <li className={classes}>
-      {handle}
+      {!sortable ? null :
+        renderLeftIcon ? (
+          <div className="key-value-editor__drag">{renderLeftIcon()}</div>
+        ) : (
+          connectDragSource?.(
+            <div className="key-value-editor__drag">
+              <i className={'fa ' + (hideButtons ? 'fa-empty' : 'fa-reorder')} />
+            </div>,
+          )
+        )}
       <div className="key-value-editor__row">
         <div
           className={classnames('form-control form-control--underlined form-control--wide', {
@@ -451,9 +450,7 @@ const KeyValueEditorRowInternal: FC<Props> = forwardRef<KeyValueEditorRowInterna
   if (noDropZone) {
     return row;
   } else {
-    const dropTarget = connectDropTarget?.(row);
-    // @ts-expect-error -- TSCONVERSION investigate whether a cast is actually appropriate here
-    return connectDragPreview?.(dropTarget);
+    return connectDragPreview?.(connectDropTarget?.(row));
   }
 });
 
@@ -496,23 +493,11 @@ const dragTarget = {
   },
 };
 
-const KeyValueEditorRowFCWithRef: ForwardRefRenderFunction<KeyValueEditorRowInternal, Omit<Props, 'enableNunjucks'>> = (
-  props,
-  ref
-) => {
-  const { enabled } = useNunjucksEnabled();
-
-  return <KeyValueEditorRowInternal ref={ref} {...props} enableNunjucks={enabled} />;
-
-};
-
-const KeyValueEditorRowFC = forwardRef(KeyValueEditorRowFCWithRef);
-
 const source = DragSource('KEY_VALUE_EDITOR', dragSource, (connect, monitor) => ({
   connectDragSource: connect.dragSource(),
   connectDragPreview: connect.dragPreview(),
   isDragging: monitor.isDragging(),
-}))(KeyValueEditorRowFC);
+}))(KeyValueEditorRowInternal);
 
 export const Row = DropTarget('KEY_VALUE_EDITOR', dragTarget, (connect, monitor) => ({
   connectDropTarget: connect.dropTarget(),
