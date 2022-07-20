@@ -45,18 +45,16 @@ export const OneLineEditorFC = forwardRef<OneLineEditorHandle, Props>((props, re
     mode: syntaxMode,
     type: originalType,
   } = props;
-  let derivedMode;
+  let defaultToInputOrEditor: 'input' | 'editor' = MODE_INPUT;
 
   if (props.forceInput) {
-    derivedMode = MODE_INPUT;
+    defaultToInputOrEditor = MODE_INPUT;
   } else if (props.forceEditor) {
-    derivedMode = MODE_EDITOR;
+    defaultToInputOrEditor = MODE_EDITOR;
   } else if (_mayContainNunjucks(props.defaultValue)) {
-    derivedMode = MODE_EDITOR;
-  } else {
-    derivedMode = MODE_INPUT;
+    defaultToInputOrEditor = MODE_EDITOR;
   }
-  const [mode, setMode] = useState(derivedMode);
+  const [mode, setMode] = useState(defaultToInputOrEditor);
   const editorRef = useRef<UnconnectedCodeEditor>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
