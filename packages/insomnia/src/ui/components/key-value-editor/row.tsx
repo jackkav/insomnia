@@ -136,12 +136,10 @@ class KeyValueEditorRowInternal extends PureComponent<Props, State> {
 
       // Insert the pasted text into the current selection.
       // Unfortunately, this is the easiest way to do this.
-      const currentValue = this._valueInput?.getValue();
+      const currentValue = this._valueInput?.getValue() || '';
 
-      // @ts-expect-error -- TSCONVERSION
-      const prefix = currentValue.slice(0, this._valueInput?.getSelectionStart());
-      // @ts-expect-error -- TSCONVERSION
-      const suffix = currentValue.slice(this._valueInput?.getSelectionEnd());
+      const prefix = currentValue.slice(0, this._valueInput?.getSelectionStart() || 0);
+      const suffix = currentValue.slice(this._valueInput?.getSelectionEnd() || 0);
       const finalValue = `${prefix}${value}${suffix}`;
 
       // Update type and value
@@ -265,167 +263,29 @@ class KeyValueEditorRowInternal extends PureComponent<Props, State> {
     });
   }
 
-  renderPairDescription() {
-    const {
-      displayDescription,
-      readOnly,
-      forceInput,
-      descriptionPlaceholder,
-      pair,
-    } = this.props;
-    return displayDescription ? (
-      <div
-        className={classnames(
-          'form-control form-control--underlined form-control--wide no-min-width',
-          {
-            'form-control--inactive': pair.disabled,
-          },
-        )}
-      >
-        <OneLineEditor
-          ref={this._setDescriptionInputRef}
-          readOnly={readOnly}
-          forceInput={forceInput}
-          placeholder={descriptionPlaceholder || 'Description'}
-          defaultValue={pair.description || ''}
-          onChange={this._handleDescriptionChange}
-          onBlur={this._handleBlurDescription}
-          onKeyDown={this._handleKeyDown}
-          onFocus={this._handleFocusDescription}
-        />
-      </div>
-    ) : null;
-  }
-
-  renderPairValue() {
-    const {
-      pair,
-      readOnly,
-      forceInput,
-      valueInputType,
-      valuePlaceholder,
-    } = this.props;
-
-    if (pair.type === 'file') {
-      return (
-        <FileInputButton
-          showFileName
-          showFileIcon
-          className="btn btn--outlined btn--super-duper-compact wide ellipsis"
-          path={pair.fileName || ''}
-          onChange={this._handleFileNameChange}
-        />
-      );
-    } else if (pair.type === 'text' && pair.multiline) {
-      const bytes = Buffer.from(pair.value, 'utf8').length;
-      return (
-        <button
-          className="btn btn--outlined btn--super-duper-compact wide ellipsis"
-          onClick={this._handleEditMultiline}
-        >
-          <i className="fa fa-pencil-square-o space-right" />
-          {bytes > 0 ? describeByteSize(bytes, true) : 'Click to Edit'}
-        </button>
-      );
-    } else {
-      return (
-        <OneLineEditor
-          ref={ref => {
-            this._valueInput = ref;
-          }}
-          readOnly={readOnly}
-          forceInput={forceInput}
-          type={valueInputType || 'text'}
-          placeholder={valuePlaceholder || 'Value'}
-          defaultValue={pair.value}
-          onPaste={this._handleValuePaste}
-          onChange={this._handleValueChange}
-          onBlur={this._handleBlurValue}
-          onKeyDown={this._handleKeyDown}
-          onFocus={this._handleFocusValue}
-          getAutocompleteConstants={this._handleAutocompleteValues}
-        />
-      );
-    }
-  }
-
-  renderPairSelector() {
-    const { hideButtons, allowMultiline, allowFile } = this.props;
-    const showDropdown = allowMultiline || allowFile;
-
-    // Put a spacer in for dropdown if needed
-    if (hideButtons && showDropdown) {
-      return (
-        <button>
-          <i className="fa fa-empty" />
-        </button>
-      );
-    }
-
-    if (hideButtons) {
-      return null;
-    }
-
-    if (showDropdown) {
-      return (
-        <Dropdown right>
-          <DropdownButton className="tall">
-            <i className="fa fa-caret-down" />
-          </DropdownButton>
-          <DropdownItem
-            onClick={this._handleTypeChange}
-            value={{
-              type: 'text',
-              multiline: false,
-            }}
-          >
-            Text
-          </DropdownItem>
-          {allowMultiline && (
-            <DropdownItem
-              onClick={this._handleTypeChange}
-              value={{
-                type: 'text',
-                multiline: true,
-              }}
-            >
-              Text (Multi-line)
-            </DropdownItem>
-          )}
-          {allowFile && (
-            <DropdownItem
-              onClick={this._handleTypeChange}
-              value={{
-                type: 'file',
-              }}
-            >
-              File
-            </DropdownItem>
-          )}
-        </Dropdown>
-      );
-    } else {
-      return null;
-    }
-  }
-
   render() {
     const {
-      pair,
-      namePlaceholder,
-      sortable,
-      noDropZone,
-      hideButtons,
-      forceInput,
-      readOnly,
+      allowFile,
+      allowMultiline,
       className,
+      connectDragPreview,
+      connectDragSource,
+      connectDropTarget,
+      descriptionPlaceholder,
+      displayDescription,
+      forceInput,
+      hideButtons,
       isDragging,
       isDraggingOver,
+      namePlaceholder,
       noDelete,
+      noDropZone,
+      pair,
+      valueInputType,
+      valuePlaceholder,
+      readOnly,
       renderLeftIcon,
-      connectDragSource,
-      connectDragPreview,
-      connectDropTarget,
+      sortable,
     } = this.props;
     const { dragDirection } = this.state;
     const classes = classnames(className, {
@@ -479,11 +339,104 @@ class KeyValueEditorRowInternal extends PureComponent<Props, State> {
               'form-control--inactive': pair.disabled,
             })}
           >
-            {this.renderPairValue()}
+            {pair.type === 'file' ? (
+              <FileInputButton
+                showFileName
+                showFileIcon
+                className="btn btn--outlined btn--super-duper-compact wide ellipsis"
+                path={pair.fileName || ''}
+                onChange={this._handleFileNameChange}
+              />
+            ) : (pair.type === 'text' && pair.multiline) ? (
+              <button
+                className="btn btn--outlined btn--super-duper-compact wide ellipsis"
+                onClick={this._handleEditMultiline}
+              >
+                <i className="fa fa-pencil-square-o space-right" />
+                {Buffer.from(pair.value, 'utf8').length > 0 ? describeByteSize(Buffer.from(pair.value, 'utf8').length, true) : 'Click to Edit'}
+              </button>
+            ) : (
+              <OneLineEditor
+                ref={ref => {
+                  this._valueInput = ref;
+                }}
+                readOnly={readOnly}
+                forceInput={forceInput}
+                type={valueInputType || 'text'}
+                placeholder={valuePlaceholder || 'Value'}
+                defaultValue={pair.value}
+                onPaste={this._handleValuePaste}
+                onChange={this._handleValueChange}
+                onBlur={this._handleBlurValue}
+                onKeyDown={this._handleKeyDown}
+                onFocus={this._handleFocusValue}
+                getAutocompleteConstants={this._handleAutocompleteValues}
+              />)}
           </div>
-          {this.renderPairDescription()}
+          {displayDescription ? (
+            <div
+              className={classnames(
+                'form-control form-control--underlined form-control--wide no-min-width',
+                {
+                  'form-control--inactive': pair.disabled,
+                },
+              )}
+            >
+              <OneLineEditor
+                ref={this._setDescriptionInputRef}
+                readOnly={readOnly}
+                forceInput={forceInput}
+                placeholder={descriptionPlaceholder || 'Description'}
+                defaultValue={pair.description || ''}
+                onChange={this._handleDescriptionChange}
+                onBlur={this._handleBlurDescription}
+                onKeyDown={this._handleKeyDown}
+                onFocus={this._handleFocusDescription}
+              />
+            </div>
+          ) : null}
 
-          {this.renderPairSelector()}
+          {(hideButtons && (allowMultiline || allowFile)) ? (
+            <button>
+              <i className="fa fa-empty" />
+            </button>
+          ) : hideButtons ? null : (allowMultiline || allowFile) ? (
+            <Dropdown right>
+              <DropdownButton className="tall">
+                <i className="fa fa-caret-down" />
+              </DropdownButton>
+              <DropdownItem
+                onClick={this._handleTypeChange}
+                value={{
+                  type: 'text',
+                  multiline: false,
+                }}
+              >
+                Text
+              </DropdownItem>
+              {allowMultiline && (
+                <DropdownItem
+                  onClick={this._handleTypeChange}
+                  value={{
+                    type: 'text',
+                    multiline: true,
+                  }}
+                >
+                  Text (Multi-line)
+                </DropdownItem>
+              )}
+              {allowFile && (
+                <DropdownItem
+                  onClick={this._handleTypeChange}
+                  value={{
+                    type: 'file',
+                  }}
+                >
+                  File
+                </DropdownItem>
+              )}
+            </Dropdown>
+          ) : null}
 
           {!hideButtons ? (
             <Button
