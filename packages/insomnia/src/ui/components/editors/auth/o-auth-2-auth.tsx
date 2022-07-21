@@ -1,5 +1,5 @@
 import { Button } from 'insomnia-components';
-import React, { ChangeEvent, FC, ReactNode, useCallback, useMemo, useState } from 'react';
+import React, { ChangeEvent, FC, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import { convertEpochToMilliseconds, toKebabCase } from '../../../../common/misc';
@@ -419,17 +419,35 @@ const OAuth2Error: FC = () => {
   }
   return debugButton;
 };
+function useTokenQuery(requestId?: string) {
+  const [token, setToken] = useState<OAuth2Token | null>(null);
 
+  useEffect(() => {
+    let isMounted = true;
+    async function syncToken() {
+      if (requestId) {
+        const tokenFromDB = await models.oAuth2Token.getByParentId(requestId);
+        isMounted && setToken(tokenFromDB);
+      }
+    }
+    requestId && syncToken();
+    return () => {
+      isMounted = false;
+    };
+  }, [requestId]);
+
+  return { token, setToken };
+}
 const useActiveOAuth2Token = () => {
-  const token = useSelector(selectActiveOAuth2Token);
   const { activeRequest: { authentication, _id: requestId } } = useActiveRequest();
+  const { token, setToken } = useTokenQuery(requestId);
   const { handleRender } = useNunjucks();
-
   const clearTokens = useCallback(async () => {
     if (token) {
       await models.oAuth2Token.remove(token);
+      setToken(null);
     }
-  }, [token]);
+  }, [setToken, token]);
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -440,7 +458,8 @@ const useActiveOAuth2Token = () => {
 
     try {
       const renderedAuthentication = await handleRender(authentication);
-      await getAccessToken(requestId, renderedAuthentication, true);
+      const token = await getAccessToken(requestId, renderedAuthentication, true);
+      setToken(token);
       setLoading(false);
     } catch (err) {
       // Clear existing tokens if there's an error
@@ -448,7 +467,7 @@ const useActiveOAuth2Token = () => {
       setError(err.message);
       setLoading(false);
     }
-  }, [authentication, clearTokens, handleRender, requestId]);
+  }, [authentication, clearTokens, handleRender, requestId, setToken]);
 
   return { error, loading, token, clearTokens, refreshToken };
 };
