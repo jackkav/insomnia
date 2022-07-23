@@ -1,5 +1,4 @@
 import classnames from 'classnames';
-import { clipboard } from 'electron';
 import React, { FC, useCallback, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { Tab, TabList, TabPanel, Tabs } from 'react-tabs';
@@ -51,15 +50,6 @@ export const ResponsePane: FC<Props> = ({
       return null;
     }
     return models.response.getBodyBuffer(response);
-  }, [response]);
-  const handleCopyResponseToClipboard = useCallback(async () => {
-    if (!response) {
-      return null;
-    }
-    const body = models.response.getBodyBuffer(response)?.toString('utf8');
-    if (body) {
-      clipboard.writeText(body);
-    }
   }, [response]);
 
   const handleTabSelect = (index: number, lastIndex: number) => {
@@ -113,9 +103,7 @@ export const ResponsePane: FC<Props> = ({
       >
         <TabList>
           <Tab tabIndex="-1">
-            <PreviewModeDropdown
-              copyToClipboard={handleCopyResponseToClipboard}
-            />
+            <PreviewModeDropdown />
           </Tab>
           <Tab tabIndex="-1">
             <Button>

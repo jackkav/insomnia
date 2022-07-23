@@ -411,7 +411,6 @@ export class ResponseViewer extends Component<ResponseViewerProps, State> {
           contentType={contentType}
           disableHtmlPreviewJs={disableHtmlPreviewJs}
           disablePreviewLinks={disablePreviewLinks}
-          download={download}
           editorFontSize={editorFontSize}
           filter={filter}
           filterHistory={filterHistory}

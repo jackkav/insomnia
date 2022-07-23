@@ -77,8 +77,8 @@ export function registerMainHandlers() {
 
   ipcMain.handle('writeFile', async (_, options: { path: string; content: string }) => {
     try {
-      await writeFile(options.filePath, options.output);
-      return options.filePath;
+      await writeFile(options.path, options.content);
+      return options.path;
     } catch (err) {
       throw new Error(err);
     }

@@ -1,5 +1,5 @@
 import { autoBindMethodsForReact } from 'class-autobind-decorator';
-import { clipboard, ipcRenderer, SaveDialogOptions } from 'electron';
+import { ipcRenderer, SaveDialogOptions } from 'electron';
 import fs from 'fs';
 import HTTPSnippet from 'httpsnippet';
 import { extension as mimeExtension } from 'mime-types';
@@ -466,7 +466,7 @@ class App extends PureComponent<AppProps, State> {
 
     // @TODO Should we throw otherwise? What should happen if we cannot find cmd?
     if (cmd) {
-      clipboard.writeText(cmd);
+      window.clipboard.writeText(cmd);
     }
   }
 

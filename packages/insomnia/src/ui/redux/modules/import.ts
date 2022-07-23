@@ -1,6 +1,6 @@
-import electron, { OpenDialogOptions } from 'electron';
-import { AnyAction } from 'redux';
-import { ThunkAction } from 'redux-thunk';
+import type { OpenDialogOptions } from 'electron';
+import type { AnyAction } from 'redux';
+import type { ThunkAction } from 'redux-thunk';
 
 import {
   importRaw,
@@ -116,7 +116,7 @@ export const importFile = (
 };
 
 export const readFromClipBoard = () => {
-  const schema = electron.clipboard.readText();
+  const schema = window.clipboard.readText();
 
   if (!schema) {
     showModal(AlertModal, {

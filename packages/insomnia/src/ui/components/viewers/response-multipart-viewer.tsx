@@ -31,7 +31,6 @@ interface Part {
 }
 
 interface Props {
-  download: (...args: any[]) => any;
   responseId: string;
   bodyBuffer: Buffer | null;
   contentType: string;
@@ -44,7 +43,6 @@ interface Props {
 }
 
 export const ResponseMultipartViewer: FC<Props> = ({
-  download,
   disableHtmlPreviewJs,
   disablePreviewLinks,
   editorFontSize,
@@ -201,7 +199,6 @@ export const ResponseMultipartViewer: FC<Props> = ({
           contentType={getContentTypeFromHeaders(selectedPart.headers, 'text/plain')}
           disableHtmlPreviewJs={disableHtmlPreviewJs}
           disablePreviewLinks={disablePreviewLinks}
-          download={download}
           editorFontSize={editorFontSize}
           error={null}
           filter={filter}

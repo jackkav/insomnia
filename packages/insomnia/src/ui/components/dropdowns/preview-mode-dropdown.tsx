@@ -10,12 +10,7 @@ import { DropdownButton } from '../base/dropdown/dropdown-button';
 import { DropdownDivider } from '../base/dropdown/dropdown-divider';
 import { DropdownItem } from '../base/dropdown/dropdown-item';
 
-interface Props {
-  copyToClipboard: () => any;
-}
-
-export const PreviewModeDropdown: FC<Props> = ({
-  copyToClipboard,
+export const PreviewModeDropdown: FC = ({
 }) => {
   const request = useSelector(selectActiveRequest);
   const previewMode = useSelector(selectResponsePreviewMode);
@@ -38,6 +33,16 @@ export const PreviewModeDropdown: FC<Props> = ({
   const exportDebugFile = useCallback(() => {
     window.main.exportResponse({ responseId: response._id, type:'Full Response' });
   }, [response._id]);
+
+  const copyToClipboard = useCallback(() => {
+    if (!response) {
+      return;
+    }
+    const body = models.response.getBodyBuffer(response)?.toString('utf8');
+    if (body) {
+      window.clipboard.writeText(body);
+    }
+  }, [response]);
 
   const shouldPrettifyOption = response.contentType.includes('json');
   return <Dropdown beside>

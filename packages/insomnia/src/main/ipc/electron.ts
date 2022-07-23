@@ -30,7 +30,23 @@ export function registerElectronHandlers() {
     event.returnValue = app.getPath(name);
   });
 
+  ipcMain.on('getPath', (event, name: Parameters<typeof Electron.app['getPath']>[0]) => {
+    event.returnValue = app.getPath(name);
+  });
+
   ipcMain.on('getAppPath', event => {
     event.returnValue = app.getAppPath();
+  });
+
+  ipcMain.on('readText', (event, text: Parameters<typeof Electron.clipboard['readText']>[0]) => {
+    event.returnValue = clipboard.readText(text);
+  });
+
+  ipcMain.on('writeText', (_, name: Parameters<typeof Electron.clipboard['writeText']>[0]) => {
+    clipboard.writeText(name);
+  });
+
+  ipcMain.on('clear', () => {
+    clipboard.clear();
   });
 }
