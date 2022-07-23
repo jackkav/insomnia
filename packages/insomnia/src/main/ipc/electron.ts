@@ -1,4 +1,4 @@
-import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
+import { clipboard, OpenDialogOptions, SaveDialogOptions } from 'electron';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 
 export function registerElectronHandlers() {

@@ -1,8 +1,5 @@
 import classnames from 'classnames';
 import { clipboard } from 'electron';
-import fs from 'fs';
-import { json as jsonPrettify } from 'insomnia-prettify';
-import { extension as mimeExtension } from 'mime-types';
 import React, { FC, useCallback, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { Tab, TabList, TabPanel, Tabs } from 'react-tabs';
@@ -17,7 +14,6 @@ import { Button } from '../base/button';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
 import { ErrorBoundary } from '../error-boundary';
-import { showError } from '../modals';
 import { ResponseTimer } from '../response-timer';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
@@ -57,58 +53,14 @@ export const ResponsePane: FC<Props> = ({
     return models.response.getBodyBuffer(response);
   }, [response]);
   const handleCopyResponseToClipboard = useCallback(async () => {
-    const bodyBuffer = handleGetResponseBody();
-    if (bodyBuffer) {
-      clipboard.writeText(bodyBuffer.toString('utf8'));
+    if (!response) {
+      return null;
     }
-  }, [handleGetResponseBody]);
-
-  const handleDownloadResponseBody = useCallback(async (prettify: boolean) => {
-    if (!response || !request) {
-      console.warn('Nothing to download');
-      return;
+    const body = models.response.getBodyBuffer(response)?.toString('utf8');
+    if (body) {
+      clipboard.writeText(body);
     }
-
-    const { contentType } = response;
-    const extension = mimeExtension(contentType) || 'unknown';
-    const { canceled, filePath: outputPath } = await window.dialog.showSaveDialog({
-      title: 'Save Response Body',
-      buttonLabel: 'Save',
-      defaultPath: `${request.name.replace(/ +/g, '_')}-${Date.now()}.${extension}`,
-    });
-
-    if (canceled) {
-      return;
-    }
-
-    const readStream = models.response.getBodyStream(response);
-    const dataBuffers: any[] = [];
-
-    if (readStream && outputPath) {
-      readStream.on('data', data => {
-        dataBuffers.push(data);
-      });
-      readStream.on('end', () => {
-        const to = fs.createWriteStream(outputPath);
-        const finalBuffer = Buffer.concat(dataBuffers);
-        to.on('error', err => {
-          showError({
-            title: 'Save Failed',
-            message: 'Failed to save response body',
-            error: err,
-          });
-        });
-
-        if (prettify && contentType.includes('json')) {
-          to.write(jsonPrettify(finalBuffer.toString('utf8')));
-        } else {
-          to.write(finalBuffer);
-        }
-
-        to.end();
-      });
-    }
-  }, [request, response]);
+  }, [response]);
 
   const handleTabSelect = (index: number, lastIndex: number) => {
     if (responseViewerRef.current != null && index === 0 && index !== lastIndex) {
@@ -162,7 +114,6 @@ export const ResponsePane: FC<Props> = ({
         <TabList>
           <Tab tabIndex="-1">
             <PreviewModeDropdown
-              download={handleDownloadResponseBody}
               copyToClipboard={handleCopyResponseToClipboard}
             />
           </Tab>
@@ -193,7 +144,6 @@ export const ResponsePane: FC<Props> = ({
             contentType={response.contentType || ''}
             disableHtmlPreviewJs={settings.disableHtmlPreviewJs}
             disablePreviewLinks={settings.disableResponsePreviewLinks}
-            download={handleDownloadResponseBody}
             editorFontSize={settings.editorFontSize}
             error={response.error}
             filter={filter}

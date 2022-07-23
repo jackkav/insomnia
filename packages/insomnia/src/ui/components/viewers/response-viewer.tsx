@@ -29,7 +29,6 @@ export interface ResponseViewerProps {
   contentType: string;
   disableHtmlPreviewJs: boolean;
   disablePreviewLinks: boolean;
-  download: (...args: any[]) => any;
   editorFontSize: number;
   filter: string;
   filterHistory: string[];
@@ -284,7 +283,6 @@ export class ResponseViewer extends Component<ResponseViewerProps, State> {
     const {
       disableHtmlPreviewJs,
       disablePreviewLinks,
-      download,
       editorFontSize,
       error: responseError,
       filter,
@@ -294,6 +292,7 @@ export class ResponseViewer extends Component<ResponseViewerProps, State> {
       updateFilter,
       url,
     } = this.props;
+    const download = () => window.main.exportResponse({ responseId, type: 'Response Body' });
     const { bodyBuffer, error: parseError } = this.state;
     const error = responseError || parseError;
 
