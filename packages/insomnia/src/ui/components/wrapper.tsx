@@ -278,6 +278,7 @@ export class WrapperClass extends PureComponent<Props, State> {
       <Fragment>
         <div key="modals" className="modals">
           <ErrorBoundary showAlert>
+            <div id="modal-portal" />
             <AnalyticsModal />
             <AlertModal ref={registerModal} />
             <ErrorModal ref={registerModal} />
@@ -292,7 +293,6 @@ export class WrapperClass extends PureComponent<Props, State> {
             <ProjectSettingsModal ref={registerModal} />
             <WorkspaceDuplicateModal ref={registerModal} vcs={vcs || undefined} />
             <CodePromptModal ref={registerModal} />
-            <RequestSettingsModal ref={registerModal} />
             <RequestGroupSettingsModal ref={registerModal} />
 
             {activeWorkspace ? <>

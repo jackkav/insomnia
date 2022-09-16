@@ -159,10 +159,7 @@ export const _SidebarRequestRow: FC<Props> = forwardRef(({
       workspaceId: activeWorkspaceId,
     });
   }, [requestGroup?._id, activeWorkspaceId]);
-
-  const handleShowRequestSettings = useCallback(() => {
-    showModal(RequestSettingsModal, { request });
-  }, [request]);
+  const [isOpen, setIsOpen] = useState(false);
 
   const [methodOverrideValue, setMethodOverrideValue] = useState<string | null>(null);
 
@@ -246,9 +243,9 @@ export const _SidebarRequestRow: FC<Props> = forwardRef(({
     } else if (isRequest(request)) {
       methodTag = <MethodTag method={request.method} override={methodOverrideValue} />;
     }
-
     node = (
       <li ref={nodeRef} className={classes}>
+        {isOpen && !isWebSocketRequest(request) && <RequestSettingsModal request={request} onHide={() => setIsOpen(false)}/>}
         <div
           className={classnames('sidebar__item', 'sidebar__item--request', {
             'sidebar__item--active': isActive,
@@ -301,7 +298,7 @@ export const _SidebarRequestRow: FC<Props> = forwardRef(({
                 right
                 ref={requestActionsDropdown}
                 handleDuplicateRequest={handleDuplicateRequest}
-                handleShowSettings={handleShowRequestSettings}
+                handleShowSettings={() => setIsOpen(true)}
                 request={request}
                 isPinned={isPinned}
                 requestGroup={requestGroup}
