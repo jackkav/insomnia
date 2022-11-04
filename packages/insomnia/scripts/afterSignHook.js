@@ -1,7 +1,7 @@
 // TODO(TSCONVERSION) not entirely sure if this can be in TypeScript or not.  If so, need to convert.
 const fs = require('fs');
 const path = require('path');
-const electronNotarize = require('electron-notarize');
+const electronNotarize = require('@electron/notarize');
 const appConfig = require('../config/config.json');
 
 // See: https://medium.com/@TwitterArchiveEraser/notarize-electron-apps-7a5f988406db
