@@ -1,12 +1,5 @@
 {
-  "json.schemas": [
-    {
-      "fileMatch": [
-        "insomnia.config.json",
-      ],
-      "url": "./packages/insomnia/src/utils/config/generated/schemas/insomnia.schema.json"
-    }
-  ],
+  "json.schemas": [],
   "files.associations": {
     "*.db": "ndjson",
     "*.jsonl": "ndjson",
@@ -14,6 +7,6 @@
   },
   "files.insertFinalNewline": true,
   "editor.formatOnSave": true,
-  "editor.formatOnSaveMode": "modificationsIfAvailable",
+  "editor.formatOnSaveMode": "modifications",
   "editor.defaultFormatter": "vscode.typescript-language-features",
 }

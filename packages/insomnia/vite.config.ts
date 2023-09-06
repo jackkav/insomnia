@@ -50,7 +50,6 @@ export default defineConfig(({ mode }) => {
         ],
       }),
       react({
-        fastRefresh: __DEV__,
         jsxRuntime: 'automatic',
         babel: {
           plugins: [

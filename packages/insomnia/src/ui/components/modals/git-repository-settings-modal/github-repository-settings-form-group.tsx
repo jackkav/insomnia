@@ -5,7 +5,6 @@ import { useInterval, useLocalStorage } from 'react-use';
 import styled from 'styled-components';
 
 import { GitRepository } from '../../../../models/git-repository';
-import { axiosRequest } from '../../../../network/axios-request';
 import {
   exchangeCodeForToken,
   generateAuthorizationUrl,
@@ -65,7 +64,7 @@ interface FetchGraphQLInput {
 async function fetchGraphQL<QueryResult>(input: FetchGraphQLInput) {
   const { headers, query, variables, url } = input;
   const response: AxiosResponse<{ data: QueryResult; errors: GraphQLError[] }> =
-    await axiosRequest({
+    await window.main.axiosRequest({
       url,
       method: 'POST',
       headers: {
@@ -390,7 +389,7 @@ const GitHubSignInForm = ({ token }: GitHubSignInFormProps) => {
             </div>
             <div className="form-row">
               <input name="link" />
-              <Button name="add-token">Add</Button>
+              <Button bg="surprise" name="add-token">Authenticate</Button>
             </div>
           </label>
           {error && (

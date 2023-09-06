@@ -1,10 +1,10 @@
 import childProcess from 'child_process';
 import { readFileSync, writeFileSync } from 'fs';
+import fs from 'fs';
+import { rm } from 'fs/promises';
 import licenseChecker from 'license-checker';
-import mkdirp from 'mkdirp';
 import { ncp } from 'ncp';
 import path from 'path';
-import rimraf from 'rimraf';
 import * as vite from 'vite';
 
 import buildMainAndPreload from '../esbuild.main';
@@ -20,19 +20,6 @@ if (require.main === module) {
     }
   });
 }
-
-const emptyDir = (relPath: string) =>
-  new Promise<void>((resolve, reject) => {
-    const dir = path.resolve(__dirname, relPath);
-    rimraf(dir, err => {
-      if (err) {
-        reject(err);
-      } else {
-        mkdirp.sync(dir);
-        resolve();
-      }
-    });
-  });
 
 const copyFiles = (relSource: string, relDest: string) =>
   new Promise<void>((resolve, reject) => {
@@ -52,7 +39,7 @@ const buildLicenseList = (relSource: string, relDest: string) =>
   new Promise<void>((resolve, reject) => {
     const source = path.resolve(__dirname, relSource);
     const dest = path.resolve(__dirname, relDest);
-    mkdirp.sync(path.dirname(dest));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
 
     licenseChecker.init(
       {
@@ -114,13 +101,11 @@ export const start = async () => {
     `[build] npm: ${childProcess.spawnSync('npm', ['--version']).stdout}`.trim()
   );
   console.log(
-    `[build] node: ${
-      childProcess.spawnSync('node', ['--version']).stdout
-    }`.trim()
+    `[build] node: ${childProcess.spawnSync('node', ['--version']).stdout}`.trim()
   );
 
-  if (process.version.indexOf('v16.') !== 0) {
-    console.log('[build] Node v16.x.x is required to build');
+  if (process.version.indexOf('v18.') !== 0) {
+    console.log('[build] Node v18.x.x is required to build');
     process.exit(1);
   }
 
@@ -128,7 +113,7 @@ export const start = async () => {
 
   // Remove folders first
   console.log('[build] Removing existing directories');
-  await emptyDir(buildFolder);
+  await rm(path.resolve(__dirname, buildFolder), { recursive: true, force: true });
 
   // Build the things
   console.log('[build] Building license list');

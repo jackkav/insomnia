@@ -1,9 +1,9 @@
 import React, { FC, Fragment } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
+import * as session from '../../../account/session';
 import {
   EditorKeyMap,
-  isDevelopment,
   isMac,
   MAX_EDITOR_FONT_SIZE,
   MAX_INTERFACE_FONT_SIZE,
@@ -14,12 +14,10 @@ import {
 import { docsKeyMaps } from '../../../common/documentation';
 import { HttpVersion, HttpVersions, UpdateChannel } from '../../../common/settings';
 import { strings } from '../../../common/strings';
-import * as models from '../../../models';
-import { initNewOAuthSession } from '../../../network/o-auth-2/misc';
-import { selectSettings, selectStats } from '../../redux/selectors';
+import { initNewOAuthSession } from '../../../network/o-auth-2/get-token';
+import { RootLoaderData } from '../../routes/root';
 import { Link } from '../base/link';
 import { CheckForUpdatesButton } from '../check-for-updates-button';
-import { HelpTooltip } from '../help-tooltip';
 import { Tooltip } from '../tooltip';
 import { BooleanSetting } from './boolean-setting';
 import { EnumSetting } from './enum-setting';
@@ -40,42 +38,12 @@ const RestartTooltip: FC<{ message: string }> = ({ message }) => (
   </Fragment>
 );
 
-const DevelopmentOnlySettings: FC = () => {
-  const { launches } = useSelector(selectStats);
-
-  if (!isDevelopment()) {
-    return null;
-  }
-
-  return (
-    <>
-      <hr className="pad-top" />
-      <h2>Development</h2>
-
-      <div className="form-row pad-top-sm">
-        <div className="form-control form-control--outlined">
-          <label>
-            Stats.Launches
-            <HelpTooltip className="space-left">If you need this to be a certain value after restarting the app, then just subtract one from your desired value before you restart.  For example, if you want to simulate first launch, set it to 0 and when you reboot it will be 1.  Note that Shift+F5 does not actually restart since it only refreshes the renderer and thus will not increment `Stats.launches`.  This is because Stats.launches is incremented in the main process whereas refreshing the app with Shift+F5 doesn't retrigger that code path.</HelpTooltip>
-            <input
-              value={String(launches)}
-              min={0}
-              name="launches"
-              onChange={async event => {
-                const launches = parseInt(event.target.value, 10);
-                await models.stats.update({ launches });
-              }}
-              type={'number'}
-            />
-          </label>
-        </div>
-      </div>
-    </>
-  );
-};
-
 export const General: FC = () => {
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const isLoggedIn = session.isLoggedIn();
+
   return (
     <div className="pad-bottom">
       <div className="row-fill row-fill--top">
@@ -316,7 +284,7 @@ export const General: FC = () => {
 
       <hr className="pad-top" />
 
-      <h2>HTTP Network Proxy</h2>
+      <h2>Network Proxy</h2>
 
       <BooleanSetting
         label="Enable proxy"
@@ -326,14 +294,16 @@ export const General: FC = () => {
 
       <div className="form-row pad-top-sm">
         <MaskedSetting
-          label='HTTP proxy'
+          label='Proxy for HTTP'
           setting='httpProxy'
+          help="Enter a HTTP or SOCKS4/5 proxy starting with appropriate prefix from the following (http://, socks4://, socks5://)"
           placeholder="localhost:8005"
           disabled={!settings.proxyEnabled}
         />
         <MaskedSetting
-          label='HTTPS proxy'
+          label='Proxy for HTTPS'
           setting='httpsProxy'
+          help="Enter a HTTPS or SOCKS4/5 proxy starting with appropriate prefix from the following (https://, socks4://, socks5://)"
           placeholder="localhost:8005"
           disabled={!settings.proxyEnabled}
         />
@@ -376,19 +346,14 @@ export const General: FC = () => {
         </Fragment>
       )}
 
-      <hr className="pad-top" />
-      <h2>Notifications</h2>
       {!updatesSupported() && (
-        <BooleanSetting
-          label="Do not notify of new releases"
-          setting="disableUpdateNotification"
-        />
+        <><hr className="pad-top" />
+          <h2>Notifications</h2>
+          <BooleanSetting
+            label="Do not notify of new releases"
+            setting="disableUpdateNotification"
+          /></>
       )}
-      <BooleanSetting
-        label="Do not tell me about premium features"
-        setting="disablePaidFeatureAds"
-        help="If checked, mute in-app notifications and other messaging about premium features."
-      />
 
       <hr className="pad-top" />
       <h2>Plugins</h2>
@@ -399,33 +364,22 @@ export const General: FC = () => {
         placeholder="~/.insomnia:/other/path"
       />
 
-      <hr className="pad-top" />
-      <h2>Network Activity</h2>
-      <BooleanSetting
-        descriptions={[
-          'In incognito mode, Insomnia will not make any network requests other than the requests you ask it to send.  You\'ll still be able to log in and manually sync collections, but any background network requests that are not the direct result of your actions will be disabled.',
-          'Note that, similar to incognito mode in Chrome, Insomnia cannot control the network behavior of any plugins you have installed.',
-        ]}
-        label="Incognito Mode"
-        setting="incognitoMode"
-      />
-
-      <BooleanSetting
-        descriptions={[
-          `Help Kong improve its products by sending anonymous data about features and plugins used, hardware and software configuration, statistics on number of requests, ${strings.collection.plural.toLowerCase()}, ${strings.document.plural.toLowerCase()}, etc.`,
-          'Please note that this will not include personal data or any sensitive information, such as request data, names, etc.',
-        ]}
-        label="Send Usage Statistics"
-        setting="enableAnalytics"
-      />
-
-      <BooleanSetting
-        descriptions={['Insomnia periodically makes background requests to api.insomnia.rest/notifications for things like email verification, out-of-date billing information, trial information.']}
-        label="Allow Notification Requests"
-        setting="allowNotificationRequests"
-      />
-
-      <DevelopmentOnlySettings />
+      {!isLoggedIn && (
+        <>
+          <hr className="pad-top" />
+          <h2>Network Activity</h2>
+          <BooleanSetting
+            descriptions={[
+              `Help Kong improve its products by sending anonymous data about features and plugins used, hardware and software configuration, statistics on number of requests, ${strings.collection.plural.toLowerCase()}, ${strings.document.plural.toLowerCase()}, etc.`,
+              'Please note that this will not include personal data or any sensitive information, such as request data, names, etc.',
+            ]}
+            label="Send Anonymous Usage Statistics"
+            setting="enableAnalytics"
+            disabled={isLoggedIn}
+          />
+        </>
+      )
+      }
     </div>
   );
 };

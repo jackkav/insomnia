@@ -1,23 +1,29 @@
 import type { IRuleResult } from '@stoplight/spectral-core';
-import { generate, runTests, Test } from 'insomnia-testing';
+import { generate, runTests, type Test } from 'insomnia-testing';
 import path from 'path';
 import { ActionFunction, redirect } from 'react-router-dom';
 
 import * as session from '../../account/session';
+import { parseApiSpec, resolveComponentSchemaRefs } from '../../common/api-specs';
 import { ACTIVITY_DEBUG, ACTIVITY_SPEC } from '../../common/constants';
 import { database } from '../../common/database';
-import { importResources, scanResources } from '../../common/import';
+import { database as db } from '../../common/database';
+import { importResourcesToWorkspace, scanResources } from '../../common/import';
+import { generateId } from '../../common/misc';
 import * as models from '../../models';
-import * as workspaceOperations from '../../models/helpers/workspace-operations';
+import { getById, update } from '../../models/helpers/request-operations';
 import { DEFAULT_ORGANIZATION_ID } from '../../models/organization';
 import { DEFAULT_PROJECT_ID, isRemoteProject } from '../../models/project';
+import { isRequest, Request } from '../../models/request';
+import { isRequestGroup, isRequestGroupId } from '../../models/request-group';
 import { UnitTest } from '../../models/unit-test';
-import { isCollection } from '../../models/workspace';
+import { isCollection, Workspace } from '../../models/workspace';
+import { WorkspaceMeta } from '../../models/workspace-meta';
 import { getSendRequestCallback } from '../../network/unit-test-feature';
 import { initializeLocalBackendProjectAndMarkForSync } from '../../sync/vcs/initialize-backend-project';
 import { getVCS } from '../../sync/vcs/vcs';
 import { invariant } from '../../utils/invariant';
-import { SegmentEvent, trackSegmentEvent } from '../analytics';
+import { SegmentEvent } from '../analytics';
 
 // Project
 export const createNewProjectAction: ActionFunction = async ({ request, params }) => {
@@ -27,7 +33,7 @@ export const createNewProjectAction: ActionFunction = async ({ request, params }
   const name = formData.get('name');
   invariant(typeof name === 'string', 'Name is required');
   const project = await models.project.create({ name });
-  trackSegmentEvent(SegmentEvent.projectLocalCreate);
+  window.main.trackSegmentEvent({ event: SegmentEvent.projectLocalCreate });
   return redirect(`/organization/${organizationId}/project/${project._id}`);
 };
 
@@ -67,7 +73,7 @@ export const deleteProjectAction: ActionFunction = async ({ params }) => {
   await models.stats.incrementDeletedRequestsForDescendents(project);
   await models.project.remove(project);
 
-  trackSegmentEvent(SegmentEvent.projectLocalDelete);
+  window.main.trackSegmentEvent({ event: SegmentEvent.projectLocalDelete });
 
   return redirect(`/organization/${DEFAULT_ORGANIZATION_ID}/project/${DEFAULT_PROJECT_ID}`);
 };
@@ -101,31 +107,36 @@ export const createNewWorkspaceAction: ActionFunction = async ({
     parentId: projectId,
   });
 
+  console.log({ workspace, name });
+
+  if (scope === 'design') {
+    await models.apiSpec.getOrCreateForParentId(workspace._id);
+  }
+
   // Create default env, cookie jar, and meta
   await models.environment.getOrCreateForParentId(workspace._id);
   await models.cookieJar.getOrCreateForParentId(workspace._id);
-  await models.workspaceMeta.getOrCreateByParentId(workspace._id);
+  const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(workspace._id);
 
   await database.flushChanges(flushId);
-  if (session.isLoggedIn() && isRemoteProject(project) && isCollection(workspace)) {
+  if (session.isLoggedIn() && isRemoteProject(project) && !workspaceMeta.gitRepositoryId) {
     const vcs = getVCS();
     if (vcs) {
-      initializeLocalBackendProjectAndMarkForSync({
+      await initializeLocalBackendProjectAndMarkForSync({
         vcs,
         workspace,
       });
     }
   }
 
-  trackSegmentEvent(
-    isCollection(workspace)
+  window.main.trackSegmentEvent({
+    event: isCollection(workspace)
       ? SegmentEvent.collectionCreate
-      : SegmentEvent.documentCreate
-  );
+      : SegmentEvent.documentCreate,
+  });
 
   return redirect(
-    `/organization/${organizationId}/project/${projectId}/workspace/${workspace._id}/${
-      workspace.scope === 'collection' ? ACTIVITY_DEBUG : ACTIVITY_SPEC
+    `/organization/${organizationId}/project/${projectId}/workspace/${workspace._id}/${workspace.scope === 'collection' ? ACTIVITY_DEBUG : ACTIVITY_SPEC
     }`
   );
 };
@@ -162,7 +173,7 @@ export const deleteWorkspaceAction: ActionFunction = async ({
   } catch (err) {
     console.warn('Failed to remove project from VCS', err);
   }
-
+  console.log(`redirecting to /organization/${organizationId}/project/${projectId}`);
   return redirect(`/organization/${organizationId}/project/${projectId}`);
 };
 
@@ -184,8 +195,21 @@ export const duplicateWorkspaceAction: ActionFunction = async ({ request, params
 
   const duplicateToProject = await models.project.getById(projectId);
   invariant(duplicateToProject, 'Project not found');
-
-  const newWorkspace = await workspaceOperations.duplicate(workspace, {
+  async function duplicate(
+    workspace: Workspace,
+    { name, parentId }: Pick<Workspace, 'name' | 'parentId'>,
+  ) {
+    const newWorkspace = await db.duplicate(workspace, {
+      name,
+      parentId,
+    });
+    await models.apiSpec.updateOrCreateForParentId(newWorkspace._id, {
+      fileName: name,
+    });
+    models.stats.incrementCreatedRequestsForDescendents(newWorkspace);
+    return newWorkspace;
+  }
+  const newWorkspace = await duplicate(workspace, {
     name,
     parentId: projectId,
   });
@@ -209,25 +233,15 @@ export const duplicateWorkspaceAction: ActionFunction = async ({ request, params
   }
 
   return redirect(
-    `/organization/${organizationId}/project/${projectId}/workspace/${newWorkspace._id}/${
-      newWorkspace.scope === 'collection' ? ACTIVITY_DEBUG : ACTIVITY_SPEC
+    `/organization/${organizationId}/project/${projectId}/workspace/${newWorkspace._id}/${newWorkspace.scope === 'collection' ? ACTIVITY_DEBUG : ACTIVITY_SPEC
     }`
   );
 };
 
 export const updateWorkspaceAction: ActionFunction = async ({ request }) => {
-  const formData = await request.formData();
-  const workspaceId = formData.get('workspaceId');
+  const patch = await request.json();
+  const workspaceId = patch.workspaceId;
   invariant(typeof workspaceId === 'string', 'Workspace ID is required');
-
-  const name = formData.get('name');
-  invariant(typeof name === 'string', 'Name is required');
-
-  const description = formData.get('description');
-  if (description) {
-    invariant(typeof description === 'string', 'Description is required');
-  }
-
   const workspace = await models.workspace.getById(workspaceId);
   invariant(workspace, 'Workspace not found');
 
@@ -236,15 +250,20 @@ export const updateWorkspaceAction: ActionFunction = async ({ request }) => {
     invariant(apiSpec, 'No Api Spec found for this workspace');
 
     await models.apiSpec.update(apiSpec, {
-      fileName: name,
+      fileName: patch.name || workspace.name,
     });
   }
 
-  await models.workspace.update(workspace, {
-    name,
-    description: description || workspace.description,
-  });
+  await models.workspace.update(workspace, patch);
 
+  return null;
+};
+
+export const updateWorkspaceMetaAction: ActionFunction = async ({ request, params }) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+  const patch = await request.json() as Partial<WorkspaceMeta>;
+  await models.workspaceMeta.updateByParentId(workspaceId, patch);
   return null;
 };
 
@@ -264,7 +283,7 @@ export const createNewTestSuiteAction: ActionFunction = async ({
     name,
   });
 
-  trackSegmentEvent(SegmentEvent.testSuiteCreate);
+  window.main.trackSegmentEvent({ event: SegmentEvent.testSuiteCreate });
 
   return redirect(`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/test/test-suite/${unitTestSuite._id}`);
 };
@@ -281,7 +300,7 @@ export const deleteTestSuiteAction: ActionFunction = async ({ params }) => {
 
   await models.unitTestSuite.remove(unitTestSuite);
 
-  trackSegmentEvent(SegmentEvent.testSuiteDelete);
+  window.main.trackSegmentEvent({ event: SegmentEvent.testSuiteDelete });
 
   return redirect(`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/test`);
 };
@@ -298,7 +317,6 @@ export const runAllTestsAction: ActionFunction = async ({
     parentId: testSuiteId,
   });
   invariant(unitTests, 'No unit tests found');
-  console.log('unitTests', unitTests);
 
   const tests: Test[] = unitTests
     .filter(t => t !== null)
@@ -310,13 +328,7 @@ export const runAllTestsAction: ActionFunction = async ({
 
   const src = generate([{ name: 'My Suite', suites: [], tests }]);
 
-  const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(
-    workspaceId
-  );
-
-  const sendRequest = getSendRequestCallback(
-    workspaceMeta?.activeEnvironmentId || undefined
-  );
+  const sendRequest = getSendRequestCallback();
 
   const results = await runTests(src, { sendRequest });
 
@@ -325,7 +337,7 @@ export const runAllTestsAction: ActionFunction = async ({
     parentId: workspaceId,
   });
 
-  trackSegmentEvent(SegmentEvent.unitTestRun);
+  window.main.trackSegmentEvent({ event: SegmentEvent.unitTestRun });
 
   return redirect(`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/test/test-suite/${testSuiteId}/test-result/${testResult._id}`);
 };
@@ -367,7 +379,7 @@ expect(response1.status).to.equal(200);`,
     name,
   });
 
-  trackSegmentEvent(SegmentEvent.unitTestCreate);
+  window.main.trackSegmentEvent({ event: SegmentEvent.unitTestCreate });
 
   return null;
 };
@@ -383,7 +395,7 @@ export const deleteTestAction: ActionFunction = async ({ params }) => {
   invariant(unitTest, 'Test not found');
 
   await models.unitTest.remove(unitTest);
-  trackSegmentEvent(SegmentEvent.unitTestDelete);
+  window.main.trackSegmentEvent({ event: SegmentEvent.unitTestDelete });
 
   return null;
 };
@@ -429,13 +441,8 @@ export const runTestAction: ActionFunction = async ({ params }) => {
     },
   ];
   const src = generate([{ name: 'My Suite', suites: [], tests }]);
-  const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(
-    unitTest.parentId
-  );
 
-  const sendRequest = getSendRequestCallback(
-    workspaceMeta?.activeEnvironmentId || undefined
-  );
+  const sendRequest = getSendRequestCallback();
 
   const results = await runTests(src, { sendRequest });
 
@@ -444,7 +451,7 @@ export const runTestAction: ActionFunction = async ({ params }) => {
     parentId: unitTest.parentId,
   });
 
-  trackSegmentEvent(SegmentEvent.unitTestRun);
+  window.main.trackSegmentEvent({ event: SegmentEvent.unitTestRun });
 
   return redirect(`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/test/test-suite/${testSuiteId}/test-result/${testResult._id}`);
 };
@@ -510,10 +517,471 @@ export const generateCollectionFromApiSpecAction: ActionFunction = async ({
     content: apiSpec.contents,
   });
 
-  await importResources({
-    projectId,
+  await importResourcesToWorkspace({
     workspaceId,
   });
 
   return redirect(`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/${ACTIVITY_DEBUG}`);
+};
+
+export const generateCollectionAndTestsAction: ActionFunction = async ({ params }) => {
+  const { organizationId, projectId, workspaceId } = params;
+
+  invariant(typeof organizationId === 'string', 'Organization ID is required');
+  invariant(typeof projectId === 'string', 'Project ID is required');
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const apiSpec = await models.apiSpec.getByParentId(workspaceId);
+
+  invariant(apiSpec, 'API Spec not found');
+
+  const workspace = await models.workspace.getById(workspaceId);
+
+  invariant(workspace, 'Workspace not found');
+
+  const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(workspaceId);
+
+  const isLintError = (result: IRuleResult) => result.severity === 0;
+  const rulesetPath = path.join(
+    process.env['INSOMNIA_DATA_PATH'] || window.app.getPath('userData'),
+    `version-control/git/${workspaceMeta?.gitRepositoryId}/other/.spectral.yaml`,
+  );
+
+  const results = (await window.main.spectralRun({ contents: apiSpec.contents, rulesetPath })).filter(isLintError);
+  if (apiSpec.contents && results && results.length) {
+    throw new Error('Error Generating Configuration');
+  }
+
+  const resources = await scanResources({
+    content: apiSpec.contents,
+  });
+
+  const aiGeneratedRequestGroup = await models.requestGroup.create({
+    name: 'AI Generated Requests',
+    parentId: workspaceId,
+  });
+
+  const requests = resources.requests?.filter(isRequest).map(request => {
+    return {
+      ...request,
+      _id: generateId(models.request.prefix),
+      parentId: aiGeneratedRequestGroup._id,
+    };
+  }) || [];
+
+  await Promise.all(requests.map(request => models.request.create(request)));
+
+  const aiTestSuite = await models.unitTestSuite.create({
+    name: 'AI Generated Tests',
+    parentId: workspaceId,
+  });
+
+  const spec = parseApiSpec(apiSpec.contents);
+
+  const getMethodInfo = (request: Request) => {
+    try {
+      const specPaths = Object.keys(spec.contents?.paths) || [];
+
+      const pathMatches = specPaths.filter(path => request.url.endsWith(path));
+
+      const closestPath = pathMatches.sort((a, b) => {
+        return a.length - b.length;
+      })[0];
+
+      const methodInfo = spec.contents?.paths[closestPath][request.method.toLowerCase()];
+
+      return methodInfo;
+    } catch (error) {
+      console.log(error);
+      return undefined;
+    }
+  };
+
+  const tests: Partial<UnitTest>[] = requests.map(request => {
+    return {
+      name: `Test: ${request.name}`,
+      code: '',
+      parentId: aiTestSuite._id,
+      requestId: request._id,
+    };
+  });
+
+  const total = tests.length;
+  let progress = 0;
+
+  // @TODO Investigate the defer API for streaming results.
+  const progressStream = new TransformStream();
+  const writer = progressStream.writable.getWriter();
+
+  writer.write({
+    progress,
+    total,
+  });
+
+  for (const test of tests) {
+    async function generateTest() {
+      try {
+        const request = requests.find(r => r._id === test.requestId);
+        if (!request) {
+          throw new Error('Request not found');
+        }
+
+        const methodInfo = resolveComponentSchemaRefs(spec, getMethodInfo(request));
+
+        const response = await window.main.insomniaFetch<{ test: { requestId: string } }>({
+          method: 'POST',
+          origin: 'https://ai.insomnia.rest',
+          path: '/v1/generate-test',
+          sessionId: session.getCurrentSessionId(),
+          data: {
+            teamId: organizationId,
+            request: requests.find(r => r._id === test.requestId),
+            methodInfo,
+          },
+        });
+
+        const aiTest = response.test;
+
+        await models.unitTest.create({ ...aiTest, parentId: aiTestSuite._id, requestId: test.requestId });
+        writer.write({
+          progress: ++progress,
+          total,
+        });
+
+      } catch (err) {
+        console.log(err);
+        writer.write({
+          progress: ++progress,
+          total,
+        });
+      }
+    }
+    generateTest();
+  }
+
+  return progressStream;
+};
+
+export const generateTestsAction: ActionFunction = async ({ params }) => {
+  const { organizationId, projectId, workspaceId } = params;
+
+  invariant(typeof organizationId === 'string', 'Organization ID is required');
+  invariant(typeof projectId === 'string', 'Project ID is required');
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const apiSpec = await models.apiSpec.getByParentId(workspaceId);
+
+  invariant(apiSpec, 'API Spec not found');
+
+  const workspace = await models.workspace.getById(workspaceId);
+
+  invariant(workspace, 'Workspace not found');
+
+  const workspaceDescendants = await database.withDescendants(workspace);
+
+  const requests = workspaceDescendants.filter(isRequest);
+
+  const aiTestSuite = await models.unitTestSuite.create({
+    name: 'AI Generated Tests',
+    parentId: workspaceId,
+  });
+
+  const tests: Partial<UnitTest>[] = requests.map(request => {
+    return {
+      name: `Test: ${request.name}`,
+      code: '',
+      parentId: aiTestSuite._id,
+      requestId: request._id,
+    };
+  });
+
+  const total = tests.length;
+  let progress = 0;
+  // @TODO Investigate the defer API for streaming results.
+  const progressStream = new TransformStream();
+  const writer = progressStream.writable.getWriter();
+
+  writer.write({
+    progress,
+    total,
+  });
+
+  for (const test of tests) {
+    async function generateTest() {
+      try {
+        const response = await window.main.insomniaFetch<{ test: { requestId: string } }>({
+          method: 'POST',
+          origin: 'https://ai.insomnia.rest',
+          path: '/v1/generate-test',
+          sessionId: session.getCurrentSessionId(),
+          data: {
+            teamId: organizationId,
+            request: requests.find(r => r._id === test.requestId),
+          },
+        });
+
+        const aiTest = response.test;
+
+        await models.unitTest.create({ ...aiTest, parentId: aiTestSuite._id, requestId: test.requestId });
+
+        writer.write({
+          progress: ++progress,
+          total,
+        });
+      } catch (err) {
+        console.log(err);
+        writer.write({
+          progress: ++progress,
+          total,
+        });
+      }
+    }
+
+    generateTest();
+  }
+
+  return progressStream;
+};
+
+export const accessAIApiAction: ActionFunction = async ({ params }) => {
+  const { organizationId, projectId, workspaceId } = params;
+
+  invariant(typeof organizationId === 'string', 'Organization ID is required');
+  invariant(typeof projectId === 'string', 'Project ID is required');
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  try {
+    const response = await window.main.insomniaFetch<{ enabled: boolean }>({
+      method: 'POST',
+      origin: 'https://ai.insomnia.rest',
+      path: '/v1/access',
+      sessionId: session.getCurrentSessionId(),
+      data: {
+        teamId: organizationId,
+      },
+    });
+
+    return {
+      enabled: response.enabled,
+    };
+  } catch (err) {
+    return { enabled: false };
+  }
+};
+
+export const createEnvironmentAction: ActionFunction = async ({
+  params,
+  request,
+}) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const { isPrivate } = await request.json();
+
+  const baseEnvironment = await models.environment.getByParentId(workspaceId);
+
+  invariant(baseEnvironment, 'Base environment not found');
+
+  const environment = await models.environment.create({
+    parentId: baseEnvironment._id,
+    isPrivate,
+  });
+
+  return environment;
+};
+export const updateEnvironment: ActionFunction = async ({ request, params }) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const { environmentId, patch } = await request.json();
+
+  invariant(typeof environmentId === 'string', 'Environment ID is required');
+
+  const environment = await models.environment.getById(environmentId);
+
+  invariant(environment, 'Environment not found');
+  invariant(typeof name === 'string', 'Name is required');
+
+  const baseEnvironment = await models.environment.getByParentId(workspaceId);
+
+  invariant(baseEnvironment, 'Base environment not found');
+
+  const updatedEnvironment = await models.environment.update(environment, patch);
+
+  return updatedEnvironment;
+};
+
+export const deleteEnvironmentAction: ActionFunction = async ({
+  request, params,
+}) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const formData = await request.formData();
+
+  const environmentId = formData.get('environmentId');
+  invariant(typeof environmentId === 'string', 'Environment ID is required');
+
+  const environment = await models.environment.getById(environmentId);
+
+  const baseEnvironment = await models.environment.getByParentId(workspaceId);
+
+  invariant(environment?._id !== baseEnvironment?._id, 'Cannot delete base environment');
+
+  invariant(environment, 'Environment not found');
+
+  await models.environment.remove(environment);
+
+  return null;
+};
+
+export const duplicateEnvironmentAction: ActionFunction = async ({
+  request, params,
+}) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const formData = await request.formData();
+
+  const environmentId = formData.get('environmentId');
+
+  invariant(typeof environmentId === 'string', 'Environment ID is required');
+
+  const environment = await models.environment.getById(environmentId);
+  invariant(environment, 'Environment not found');
+
+  const newEnvironment = await models.environment.duplicate(environment);
+
+  return newEnvironment;
+};
+
+export const setActiveEnvironmentAction: ActionFunction = async ({
+  request, params,
+}) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const formData = await request.formData();
+
+  const environmentId = formData.get('environmentId');
+
+  invariant(typeof environmentId === 'string', 'Environment ID is required');
+
+  const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(workspaceId);
+
+  invariant(workspaceMeta, 'Workspace meta not found');
+
+  await models.workspaceMeta.update(workspaceMeta, { activeEnvironmentId: environmentId || null });
+
+  return null;
+};
+
+export const updateCookieJarAction: ActionFunction = async ({
+  request, params,
+}) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+
+  const { cookieJarId, patch } = await request.json();
+
+  invariant(typeof cookieJarId === 'string', 'Cookie Jar ID is required');
+
+  const cookieJar = await models.cookieJar.getById(cookieJarId);
+
+  invariant(cookieJar, 'Cookie Jar not found');
+
+  const updatedCookieJar = await models.cookieJar.update(cookieJar, patch);
+
+  return updatedCookieJar;
+};
+
+export const createNewCaCertificateAction: ActionFunction = async ({ request }) => {
+  const patch = await request.json();
+  await models.caCertificate.create(patch);
+  return null;
+};
+
+export const updateCaCertificateAction: ActionFunction = async ({ request }) => {
+  const patch = await request.json();
+  const caCertificate = await models.caCertificate.getById(patch._id);
+  invariant(caCertificate, 'CA Certificate not found');
+  await models.caCertificate.update(caCertificate, patch);
+  return null;
+};
+
+export const deleteCaCertificateAction: ActionFunction = async ({ params }) => {
+  const { workspaceId } = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+  const caCertificate = await models.caCertificate.findByParentId(workspaceId);
+  invariant(caCertificate, 'CA Certificate not found');
+  await models.caCertificate.removeWhere(workspaceId);
+  return null;
+};
+
+export const createNewClientCertificateAction: ActionFunction = async ({ request }) => {
+  const patch = await request.json();
+  await models.clientCertificate.create(patch);
+  return null;
+};
+
+export const updateClientCertificateAction: ActionFunction = async ({ request }) => {
+  const patch = await request.json();
+  const clientCertificate = await models.clientCertificate.getById(patch._id);
+  invariant(clientCertificate, 'CA Certificate not found');
+  await models.clientCertificate.update(clientCertificate, patch);
+  return null;
+};
+
+export const deleteClientCertificateAction: ActionFunction = async ({ request }) => {
+  const { _id } = await request.json();
+  const clientCertificate = await models.clientCertificate.getById(_id);
+  invariant(clientCertificate, 'CA Certificate not found');
+  await models.clientCertificate.remove(clientCertificate);
+  return null;
+};
+
+export const updateSettingsAction: ActionFunction = async ({ request }) => {
+  const patch = await request.json();
+  await models.settings.patch(patch);
+  return null;
+};
+
+const getCollectionItem = async (id: string) => {
+  let item;
+  if (isRequestGroupId(id)) {
+    item = await models.requestGroup.getById(id);
+  } else {
+    item = await getById(id);
+  }
+
+  invariant(item, 'Item not found');
+
+  return item;
+};
+
+export const reorderCollectionAction: ActionFunction = async ({ request, params }) => {
+  const { workspaceId }  = params;
+  invariant(typeof workspaceId === 'string', 'Workspace ID is required');
+  const { id, targetId, dropPosition, metaSortKey } = await request.json();
+  invariant(typeof id === 'string', 'ID is required');
+  invariant(typeof targetId === 'string', 'Target ID is required');
+  invariant(typeof dropPosition === 'string', 'Drop position is required');
+  invariant(typeof metaSortKey === 'number', 'MetaSortKey position is required');
+
+  if (id === targetId) {
+    return null;
+  }
+
+  const item = await getCollectionItem(id);
+  const targetItem = await getCollectionItem(targetId);
+
+  const parentId = dropPosition === 'after' && isRequestGroup(targetItem) ? targetItem._id : targetItem.parentId;
+
+  if (isRequestGroup(item)) {
+    await models.requestGroup.update(item, { parentId, metaSortKey });
+  } else {
+    await update(item, { parentId, metaSortKey });
+  }
+
+  return null;
 };

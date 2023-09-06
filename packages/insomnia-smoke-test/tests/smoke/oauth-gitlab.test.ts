@@ -1,6 +1,9 @@
 import { test } from '../../playwright/test';
 
 test('Sign in with Gitlab', async ({ app, page }) => {
+  await page.getByRole('button', { name: 'New Document' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Git Sync' }).click();
   await page.getByRole('button', { name: 'Setup Git Sync' }).click();
   await page.getByRole('tab', { name: 'GitLab' }).click();
 
@@ -31,7 +34,7 @@ test('Sign in with Gitlab', async ({ app, page }) => {
 
   await page.locator('input[name="link"]').click();
   await page.locator('input[name="link"]').fill(redirectUrl);
-  await page.getByRole('button', { name: 'Add' }).click();
+  await page.getByRole('button', { name: 'Authenticate' }).click();
 
   test.expect(await page.locator('text="Mark Kim"')).toBeTruthy();
   test.expect(await page.locator('button[name="sign-out"]')).toBeTruthy();

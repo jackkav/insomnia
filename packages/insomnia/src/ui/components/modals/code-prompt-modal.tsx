@@ -3,7 +3,7 @@ import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { NunjucksEnabledProvider } from '../../context/nunjucks/nunjucks-enabled-context';
 import { CopyButton } from '../base/copy-button';
 import { Dropdown, DropdownButton, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
-import { type ModalHandle, Modal, ModalProps } from '../base/modal';
+import { Modal, type ModalHandle, ModalProps } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalFooter } from '../base/modal-footer';
 import { ModalHeader } from '../base/modal-header';
@@ -118,6 +118,7 @@ export const CodePromptModal = forwardRef<CodePromptModalHandle, ModalProps>((_,
             <div className="pad-sm pad-bottom tall">
               <div className="form-control form-control--outlined form-control--tall tall">
                 <CodeEditor
+                  id="code-prompt-modal"
                   hideLineNumbers
                   showPrettifyButton
                   className="tall"

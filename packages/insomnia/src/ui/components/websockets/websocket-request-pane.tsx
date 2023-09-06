@@ -1,20 +1,22 @@
-import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
+import React, { FC, useEffect, useRef, useState } from 'react';
+import { useParams, useRouteLoaderData } from 'react-router-dom';
 import styled from 'styled-components';
 
 import { AuthType, CONTENT_TYPE_JSON } from '../../../common/constants';
-import { getRenderContext, render, RENDER_PURPOSE_SEND } from '../../../common/render';
 import * as models from '../../../models';
 import { Environment } from '../../../models/environment';
 import { WebSocketRequest } from '../../../models/websocket-request';
+import { tryToInterpolateRequestOrShowRenderErrorModal } from '../../../utils/try-interpolate';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '../../../utils/url/querystring';
-import { ReadyState, useWSReadyState } from '../../context/websocket-client/use-ws-ready-state';
+import { useReadyState } from '../../hooks/use-ready-state';
+import { useRequestPatcher } from '../../hooks/use-request';
 import { useActiveRequestSyncVCSVersion, useGitVCSVersion } from '../../hooks/use-vcs-version';
-import { selectActiveRequestMeta, selectSettings } from '../../redux/selectors';
+import { WebSocketRequestLoaderData } from '../../routes/request';
+import { RootLoaderData } from '../../routes/root';
 import { TabItem, Tabs } from '../base/tabs';
 import { CodeEditor, CodeEditorHandle } from '../codemirror/code-editor';
 import { AuthDropdown } from '../dropdowns/auth-dropdown';
-import { WebSocketPreviewModeDropdown } from '../dropdowns/websocket-preview-mode';
+import { WebSocketPreviewMode } from '../dropdowns/websocket-preview-mode';
 import { AuthWrapper } from '../editors/auth/auth-wrapper';
 import { QueryEditorContainer, QueryEditorPreview } from '../editors/query-editor';
 import { RequestHeadersEditor } from '../editors/request-headers-editor';
@@ -36,19 +38,18 @@ const SendMessageForm = styled.form({
   position: 'relative',
   boxSizing: 'border-box',
 });
-const SendButton = styled.button<{ isConnected: boolean }>(({ isConnected }) =>
-  ({
-    padding: '0 var(--padding-md)',
-    marginLeft: 'var(--padding-xs)',
-    height: '100%',
-    border: '1px solid var(--hl-lg)',
-    borderRadius: 'var(--radius-md)',
-    background: isConnected ? 'var(--color-surprise)' : 'inherit',
-    color: isConnected ? 'var(--color-font-surprise)' : 'inherit',
-    ':hover': {
-      filter: 'brightness(0.8)',
-    },
-  }));
+const SendButton = styled.button<{ isConnected: boolean }>(({ isConnected }) => ({
+  padding: '0 var(--padding-md)',
+  marginLeft: 'var(--padding-xs)',
+  height: '100%',
+  border: '1px solid var(--hl-lg)',
+  borderRadius: 'var(--radius-md)',
+  background: isConnected ? 'var(--color-surprise)' : 'inherit',
+  color: isConnected ? 'var(--color-font-surprise)' : 'inherit',
+  ':hover': {
+    filter: 'brightness(0.8)',
+  },
+}));
 
 const PaneSendButton = styled.div({
   display: 'flex',
@@ -106,21 +107,25 @@ const WebSocketRequestForm: FC<FormProps> = ({
 
     init();
   }, [request._id]);
+
   // NOTE: Nunjucks interpolation can throw errors
   const interpolateOpenAndSend = async (payload: string) => {
     try {
-      const renderContext = await getRenderContext({ request, environmentId, purpose: RENDER_PURPOSE_SEND });
-      const renderedMessage = await render(payload, renderContext);
+      const renderedMessage = await tryToInterpolateRequestOrShowRenderErrorModal({ request, environmentId, payload });
       const readyState = await window.main.webSocket.readyState.getCurrent({ requestId: request._id });
-      if (readyState !== ReadyState.OPEN) {
+      if (!readyState) {
         const workspaceCookieJar = await models.cookieJar.getOrCreateForParentId(workspaceId);
-        const rendered = await render({
-          url: request.url,
-          headers: request.headers,
-          authentication: request.authentication,
-          parameters: request.parameters.filter(p => !p.disabled),
-          workspaceCookieJar,
-        }, renderContext);
+        const rendered = await tryToInterpolateRequestOrShowRenderErrorModal({
+          request,
+          environmentId,
+          payload: {
+            url: request.url,
+            headers: request.headers,
+            authentication: request.authentication,
+            parameters: request.parameters.filter(p => !p.disabled),
+            workspaceCookieJar,
+          },
+        });
         window.main.webSocket.open({
           requestId: request._id,
           workspaceId,
@@ -180,6 +185,7 @@ const WebSocketRequestForm: FC<FormProps> = ({
       }}
     >
       <CodeEditor
+        id="websocket-message-editor"
         showPrettifyButton
         uniquenessKey={request._id}
         mode={previewMode}
@@ -192,8 +198,6 @@ const WebSocketRequestForm: FC<FormProps> = ({
 };
 
 interface Props {
-  request: WebSocketRequest;
-  workspaceId: string;
   environment: Environment | null;
 }
 
@@ -201,22 +205,24 @@ interface Props {
 // essentially we can lift up the states and merge request pane and response pane into a single page and divide the UI there.
 // currently this is blocked by the way page layout divide the panes with dragging functionality
 // TODO: @gatzjames discuss above assertion in light of request and settings drills
-export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environment }) => {
-  const readyState = useWSReadyState(request._id);
-  const { useBulkParametersEditor } = useSelector(selectSettings);
+export const WebSocketRequestPane: FC<Props> = ({ environment }) => {
+  const { activeRequest, activeRequestMeta } = useRouteLoaderData('request/:requestId') as WebSocketRequestLoaderData;
 
-  const disabled = readyState === ReadyState.OPEN || readyState === ReadyState.CLOSING;
-  const handleOnChange = (url: string) => {
-    if (url !== request.url) {
-      models.webSocketRequest.update(request, { url });
-    }
-  };
+  const { workspaceId, requestId } = useParams() as { organizationId: string; projectId: string; workspaceId: string; requestId: string };
+  const readyState = useReadyState({ requestId: activeRequest._id, protocol: 'webSocket' });
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const { useBulkParametersEditor } = settings;
+
+  const disabled = readyState;
+
   const [previewMode, setPreviewMode] = useState(CONTENT_TYPE_JSON);
 
   useEffect(() => {
     let isMounted = true;
     const fn = async () => {
-      const payload = await models.webSocketPayload.getByParentId(request._id);
+      const payload = await models.webSocketPayload.getByParentId(requestId);
       if (isMounted && payload) {
         setPreviewMode(payload.mode);
       }
@@ -225,7 +231,7 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
     return () => {
       isMounted = false;
     };
-  }, [request._id]);
+  }, [requestId]);
 
   const changeMode = (mode: string) => {
     setPreviewMode(mode);
@@ -234,48 +240,39 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
 
   const upsertPayloadWithMode = async (mode: string) => {
     // @TODO: multiple payloads
-    const payload = await models.webSocketPayload.getByParentId(request._id);
+    const payload = await models.webSocketPayload.getByParentId(requestId);
     if (payload) {
       await models.webSocketPayload.update(payload, { mode });
     } else {
       await models.webSocketPayload.create({
-        parentId: request._id,
+        parentId: requestId,
         value: '',
         mode,
       });
     }
   };
-
-  const handleEditDescription = useCallback(() => {
-    showModal(RequestSettingsModal, { request });
-  }, [request]);
-
-  const handleEditDescriptionAdd = useCallback(() => {
-    showModal(RequestSettingsModal, { request, forceEditMode: true });
-  }, [request]);
+  const [isRequestSettingsModalOpen, setIsRequestSettingsModalOpen] = useState(false);
 
   const gitVersion = useGitVCSVersion();
   const activeRequestSyncVersion = useActiveRequestSyncVCSVersion();
-  const activeRequestMeta = useSelector(selectActiveRequestMeta);
-
+  const patchRequest = useRequestPatcher();
   // Reset the response pane state when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
-  const uniqueKey = `${environment?.modified}::${request?._id}::${gitVersion}::${activeRequestSyncVersion}::${activeRequestMeta?.activeResponseId}`;
+  const uniqueKey = `${environment?.modified}::${requestId}::${gitVersion}::${activeRequestSyncVersion}::${activeRequestMeta.activeResponseId}`;
 
   return (
     <Pane type="request">
       <PaneHeader>
         <WebSocketActionBar
           key={uniqueKey}
-          request={request}
-          workspaceId={workspaceId}
+          request={activeRequest}
           environmentId={environment?._id || ''}
-          defaultValue={request.url}
+          defaultValue={activeRequest.url}
           readyState={readyState}
-          onChange={handleOnChange}
+          onChange={url => patchRequest(requestId, { url })}
         />
       </PaneHeader>
       <Tabs aria-label="Websocket request pane tabs">
-        <TabItem key="websocket-preview-mode" title={<WebSocketPreviewModeDropdown previewMode={previewMode} onClick={changeMode} />}>
+        <TabItem key="websocket-preview-mode" title={<WebSocketPreviewMode previewMode={previewMode} onClick={changeMode} />}>
           <div
             style={{
               display: 'flex',
@@ -287,14 +284,14 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
               <SendButton
                 type="submit"
                 form="websocketMessageForm"
-                isConnected={readyState === ReadyState.OPEN}
+                isConnected={readyState}
               >
                 Send
               </SendButton>
             </PaneSendButton>
             <WebSocketRequestForm
               key={uniqueKey}
-              request={request}
+              request={activeRequest}
               previewMode={previewMode}
               environmentId={environment?._id || ''}
               workspaceId={workspaceId}
@@ -318,7 +315,7 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
                   key={uniqueKey}
                   errorClassName="tall wide vertically-align font-error pad text-center"
                 >
-                  <RenderedQueryString request={request} />
+                  <RenderedQueryString request={activeRequest} />
                 </ErrorBoundary>
               </code>
             </QueryEditorPreview>
@@ -328,7 +325,6 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
                 errorClassName="tall wide vertically-align font-error pad text-center"
               >
                 <RequestParametersEditor
-                  request={request}
                   bulk={useBulkParametersEditor}
                   disabled={disabled}
                 />
@@ -340,9 +336,8 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
           {disabled && <PaneReadOnlyBanner />}
           <RequestHeadersEditor
             key={uniqueKey}
-            request={request}
             bulk={false}
-            isDisabled={readyState === ReadyState.OPEN}
+            isDisabled={readyState}
           />
         </TabItem>
         <TabItem
@@ -350,7 +345,7 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
           title={
             <>
               Docs
-              {request.description && (
+              {activeRequest.description && (
                 <span className="bubble space-left">
                   <i className="fa fa--skinny fa-check txt-xxs" />
                 </span>
@@ -358,18 +353,18 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
             </>
           }
         >
-          {request.description ? (
+          {activeRequest.description ? (
             <div>
               <div className="pull-right pad bg-default">
-                <button className="btn btn--clicky" onClick={handleEditDescription}>
+                <button className="btn btn--clicky" onClick={() => setIsRequestSettingsModalOpen(true)}>
                   Edit
                 </button>
               </div>
               <div className="pad">
                 <ErrorBoundary errorClassName="font-error pad text-center">
                   <MarkdownPreview
-                    heading={request.name}
-                    markdown={request.description}
+                    heading={activeRequest.name}
+                    markdown={activeRequest.description}
                   />
                 </ErrorBoundary>
               </div>
@@ -388,10 +383,7 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
                 </span>
                 <br />
                 <br />
-                <button
-                  className="btn btn--clicky faint"
-                  onClick={handleEditDescriptionAdd}
-                >
+                  <button className="btn btn--clicky faint" onClick={() => setIsRequestSettingsModalOpen(true)}>
                   Add Description
                 </button>
               </p>
@@ -399,6 +391,12 @@ export const WebSocketRequestPane: FC<Props> = ({ request, workspaceId, environm
           )}
         </TabItem>
       </Tabs>
+      {isRequestSettingsModalOpen && (
+        <RequestSettingsModal
+          request={activeRequest}
+          onHide={() => setIsRequestSettingsModalOpen(false)}
+        />
+      )}
     </Pane>
   );
 };

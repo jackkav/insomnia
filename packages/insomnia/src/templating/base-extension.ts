@@ -6,7 +6,12 @@ import * as templating from './index';
 import { decodeEncoding } from './utils';
 
 const EMPTY_ARG = '__EMPTY_NUNJUCKS_ARG__';
-
+export interface HelperContext {
+  context: any;
+  meta: any;
+  renderPurpose: any;
+  util: any;
+}
 export default class BaseExtension {
   _ext: PluginTemplateTag | null = null;
   _plugin: Plugin | null = null;
@@ -91,19 +96,17 @@ export default class BaseExtension {
     const renderMeta = renderContext.getMeta ? renderContext.getMeta() : {};
     // Pull out the purpose
     const renderPurpose = renderContext.getPurpose ? renderContext.getPurpose() : null;
-    // Pull out the environment ID
-    const environmentId = renderContext.getEnvironmentId ? renderContext.getEnvironmentId() : 'n/a';
     // Extract the rest of the args
     const args = runArgs
       .slice(0, runArgs.length - 1)
       .filter(a => a !== EMPTY_ARG)
       .map(decodeEncoding);
     // Define a helper context with utils
-    const helperContext = {
+    const helperContext: HelperContext = {
       ...pluginContexts.app.init(renderPurpose),
       // @ts-expect-error -- TSCONVERSION
       ...pluginContexts.store.init(this._plugin),
-      ...pluginContexts.network.init(environmentId),
+      ...pluginContexts.network.init(),
       context: renderContext,
       meta: renderMeta,
       renderPurpose,
@@ -151,6 +154,7 @@ export default class BaseExtension {
       return;
     }
 
+    // FIX THIS: this is throwing unhandled exceptions
     // If the result is a promise, resolve it async
     if (result instanceof Promise) {
       result

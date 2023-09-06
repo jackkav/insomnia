@@ -1,15 +1,13 @@
 import clone from 'clone';
 import { format } from 'date-fns';
 import fs from 'fs';
-import { NoParamCallback } from 'fs-extra';
 import path from 'path';
 import React from 'react';
-import { unreachableCase } from 'ts-assert-unreachable';
 import YAML from 'yaml';
 
 import { isApiSpec } from '../models/api-spec';
 import { isCookieJar } from '../models/cookie-jar';
-import { Environment, isEnvironment } from '../models/environment';
+import { isEnvironment } from '../models/environment';
 import { isGrpcRequest } from '../models/grpc-request';
 import * as requestOperations from '../models/helpers/request-operations';
 import type { BaseModel } from '../models/index';
@@ -24,7 +22,7 @@ import { isWebSocketPayload } from '../models/websocket-payload';
 import { isWebSocketRequest } from '../models/websocket-request';
 import { isWorkspace, Workspace } from '../models/workspace';
 import { resetKeys } from '../sync/ignore-keys';
-import { SegmentEvent, trackSegmentEvent } from '../ui/analytics';
+import { SegmentEvent } from '../ui/analytics';
 import { showAlert, showError, showModal } from '../ui/components/modals';
 import { AskModal } from '../ui/components/modals/ask-modal';
 import { SelectModal } from '../ui/components/modals/select-modal';
@@ -128,7 +126,6 @@ export async function exportRequestsHAR(
   }
 
   const data = await har.exportHar(harRequests);
-  trackSegmentEvent(SegmentEvent.dataExport, { type: 'har' });
   return JSON.stringify(data, null, '\t');
 }
 
@@ -271,7 +268,6 @@ export async function exportRequestsData(
       delete d.type;
       return d;
     });
-  trackSegmentEvent(SegmentEvent.dataExport, { type: format });
 
   if (format.toLowerCase() === 'yaml') {
     return YAML.stringify(data);
@@ -327,11 +323,11 @@ const showSelectExportTypeModal = ({ onDone }: {
   });
 };
 
-const showExportPrivateEnvironmentsModal = async (privateEnvNames: string) => {
+const showExportPrivateEnvironmentsModal = async () => {
   return new Promise<boolean>(resolve => {
     showModal(AskModal, {
       title: 'Export Private Environments?',
-      message: `Do you want to include private environments (${privateEnvNames}) in your export?`,
+      message: 'Do you want to include private environments in your export?',
       onDone: async (isYes: boolean) => {
         if (isYes) {
           resolve(true);
@@ -363,7 +359,7 @@ const showSaveExportedFileDialog = async ({
   return filePath || null;
 };
 
-const writeExportedFileToFileSystem = (filename: string, jsonData: string, onDone: NoParamCallback) => {
+const writeExportedFileToFileSystem = (filename: string, jsonData: string, onDone: fs.NoParamCallback) => {
   // Remember last exported path
   window.localStorage.setItem('insomnia.lastExportPath', path.dirname(filename));
   fs.writeFile(filename, jsonData, {}, onDone);
@@ -380,19 +376,9 @@ export const exportAllToFile = (activeProjectName: string, workspacesForActivePr
 
   showSelectExportTypeModal({
     onDone: async selectedFormat => {
-      // Check if we want to export private environments.
-      const environments = await models.environment.all();
-
-      let exportPrivateEnvironments = false;
-      const privateEnvironments = environments.filter(environment => environment.isPrivate);
-
-      if (privateEnvironments.length) {
-        const names = privateEnvironments.map(environment => environment.name).join(', ');
-        exportPrivateEnvironments = await showExportPrivateEnvironmentsModal(names);
-      }
-
+      const exportPrivateEnvironments = await showExportPrivateEnvironmentsModal();
       const fileName = await showSaveExportedFileDialog({
-        exportedFileNamePrefix: 'Insomnia-All',
+        exportedFileNamePrefix: activeProjectName,
         selectedFormat,
       });
 
@@ -417,8 +403,9 @@ export const exportAllToFile = (activeProjectName: string, workspacesForActivePr
             break;
 
           default:
-            unreachableCase(selectedFormat, `selected export format "${selectedFormat}" is invalid`);
+            throw new Error(`selected export format "${selectedFormat}" is invalid`);
         }
+        window.main.trackSegmentEvent({ event: SegmentEvent.dataExport, properties: { type: selectedFormat } });
       } catch (err) {
         showError({
           title: 'Export Failed',
@@ -440,9 +427,7 @@ export const exportRequestsToFile = (requestIds: string[]) => {
   showSelectExportTypeModal({
     onDone: async selectedFormat => {
       const requests: BaseModel[] = [];
-      const privateEnvironments: Environment[] = [];
       const workspaceLookup: any = {};
-
       for (const requestId of requestIds) {
         const request = await requestOperations.getById(requestId);
 
@@ -462,20 +447,8 @@ export const exportRequestsToFile = (requestIds: string[]) => {
         }
 
         workspaceLookup[workspace._id] = true;
-        const descendants = await database.withDescendants(workspace);
-        const privateEnvs = descendants.filter(isEnvironment).filter(
-          descendant => descendant.isPrivate,
-        );
-        privateEnvironments.push(...privateEnvs);
       }
-
-      let exportPrivateEnvironments = false;
-
-      if (privateEnvironments.length) {
-        const names = privateEnvironments.map(privateEnvironment => privateEnvironment.name).join(', ');
-        exportPrivateEnvironments = await showExportPrivateEnvironmentsModal(names);
-      }
-
+      const exportPrivateEnvironments = await showExportPrivateEnvironmentsModal();
       const fileName = await showSaveExportedFileDialog({
         exportedFileNamePrefix: 'Insomnia',
         selectedFormat,
@@ -502,8 +475,9 @@ export const exportRequestsToFile = (requestIds: string[]) => {
             break;
 
           default:
-            unreachableCase(selectedFormat, `selected export format "${selectedFormat}" is invalid`);
+            throw new Error(`selected export format "${selectedFormat}" is invalid`);
         }
+        window.main.trackSegmentEvent({ event: SegmentEvent.dataExport, properties: { type: selectedFormat } });
       } catch (err) {
         showError({
           title: 'Export Failed',

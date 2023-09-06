@@ -6,7 +6,7 @@ import styled from 'styled-components';
 import { docsGitSync } from '../../../../common/documentation';
 import type { GitRepository, OauthProviderName } from '../../../../models/git-repository';
 import { Link } from '../../base/link';
-import { type ModalHandle, Modal, ModalProps } from '../../base/modal';
+import { Modal, type ModalHandle, ModalProps } from '../../base/modal';
 import { ModalBody } from '../../base/modal-body';
 import { ModalFooter } from '../../base/modal-footer';
 import { ModalHeader } from '../../base/modal-header';
@@ -71,9 +71,11 @@ export const GitRepositorySettingsModal = (props: ModalProps & {
 
   useEffect(() => {
     if (errors && errors.length) {
+      const errorMessage = errors.map(e => e instanceof Error ? e.message : typeof e === 'string' && e).join(', ');
+
       showAlert({
         title: 'Error Cloning Repository',
-        message: errors.map(e => e instanceof Error ? e.message : typeof e === 'string' && e).join(''),
+        message: errorMessage,
       });
     }
   }, [errors]);

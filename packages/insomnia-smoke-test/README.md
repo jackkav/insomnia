@@ -23,7 +23,7 @@ This project contains the smoke testing suite for Insomnia App.
 Prerequisites:
 
 - Clone the project
-- Run `npm run bootstrap`
+- Run `npm install`
 
 To run all tests:
 
@@ -69,7 +69,7 @@ To open a local trace viewer for a given test output, run:
 
 ```shell
 # Example:
-npx playwright show-trace packages/insomnia-smoke-test/screenshots/app-can-send-requests/trace.zip
+npx playwright show-trace packages/insomnia-smoke-test/traces/app-can-send-requests/trace.zip
 ```
 
 Alternatively you can upload this trace to [trace.playwright.dev](https://trace.playwright.dev/).
@@ -126,5 +126,5 @@ Each of the above commands will automatically run the Express server, so you do 
 Non recurring / non-CI tests, like pre-release ones, can be run using [Playwright VS Code extension](#playwright-vs-code-extension) or by running `test:dev` against the desired test file:
 
 ```shell
-npm run test:dev --prefix packages/insomnia-smoke-test -- preferences-interactions
+npm run test:dev -w packages/insomnia-smoke-test -- preferences-interactions
 ```

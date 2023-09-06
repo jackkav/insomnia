@@ -1,15 +1,14 @@
-import React, { FC, useCallback, useLayoutEffect, useRef } from 'react';
+import React, { FC, useLayoutEffect, useRef } from 'react';
+import { useFetcher, useParams } from 'react-router-dom';
 import styled from 'styled-components';
 
-import { getRenderContext, render, RENDER_PURPOSE_SEND } from '../../../common/render';
 import * as models from '../../../models';
 import { WebSocketRequest } from '../../../models/websocket-request';
+import { tryToInterpolateRequestOrShowRenderErrorModal } from '../../../utils/try-interpolate';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '../../../utils/url/querystring';
-import { ReadyState } from '../../context/websocket-client/use-ws-ready-state';
+import { ConnectActionParams } from '../../routes/request';
 import { OneLineEditor, OneLineEditorHandle } from '../codemirror/one-line-editor';
 import { createKeybindingsHandler, useDocBodyKeyboardShortcuts } from '../keydown-binder';
-import { showAlert, showModal } from '../modals';
-import { RequestRenderErrorModal } from '../modals/request-render-error-modal';
 import { DisconnectButton } from './disconnect-button';
 
 const Button = styled.button<{ warning?: boolean }>(({ warning }) => ({
@@ -26,10 +25,9 @@ const Button = styled.button<{ warning?: boolean }>(({ warning }) => ({
 
 interface ActionBarProps {
   request: WebSocketRequest;
-  workspaceId: string;
   environmentId: string;
   defaultValue: string;
-  readyState: ReadyState;
+  readyState: boolean;
   onChange: (value: string) => void;
 }
 
@@ -67,57 +65,50 @@ export const ConnectionCircle = styled.span({
   borderRadius: '50%',
 });
 
-export const WebSocketActionBar: FC<ActionBarProps> = ({ request, workspaceId, environmentId, defaultValue, onChange, readyState }) => {
-  const isOpen = readyState === ReadyState.OPEN;
+export const WebSocketActionBar: FC<ActionBarProps> = ({ request, environmentId, defaultValue, onChange, readyState }) => {
+  const isOpen = readyState;
   const oneLineEditorRef = useRef<OneLineEditorHandle>(null);
   useLayoutEffect(() => {
     oneLineEditorRef.current?.focusEnd();
   }, []);
-  const handleSubmit = useCallback(async () => {
+
+  const fetcher = useFetcher();
+  const { organizationId, projectId, workspaceId, requestId } = useParams() as { organizationId: string; projectId: string; workspaceId: string; requestId: string };
+  const connect = (connectParams: ConnectActionParams) => {
+    fetcher.submit(JSON.stringify(connectParams),
+      {
+        action: `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/debug/request/${requestId}/connect`,
+        method: 'post',
+        encType: 'application/json',
+      });
+  };
+
+  const handleSubmit = async () => {
     if (isOpen) {
       window.main.webSocket.close({ requestId: request._id });
       return;
     }
-    try {
-      const renderContext = await getRenderContext({ request, environmentId, purpose: RENDER_PURPOSE_SEND });
-      // Render any nunjucks tags in the url/headers/authentication settings/cookies
-      const workspaceCookieJar = await models.cookieJar.getOrCreateForParentId(workspaceId);
-      const rendered = await render({
+    // Render any nunjucks tags in the url/headers/authentication settings/cookies
+    const workspaceCookieJar = await models.cookieJar.getOrCreateForParentId(workspaceId);
+    const rendered = await tryToInterpolateRequestOrShowRenderErrorModal({
+      request,
+      environmentId,
+      payload: {
         url: request.url,
         headers: request.headers,
         authentication: request.authentication,
         parameters: request.parameters.filter(p => !p.disabled),
         workspaceCookieJar,
-      }, renderContext);
-      window.main.webSocket.open({
-        requestId: request._id,
-        workspaceId,
-        url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
-        headers: rendered.headers,
-        authentication: rendered.authentication,
-        cookieJar: rendered.workspaceCookieJar,
-      });
-    } catch (err) {
-      if (err.type === 'render') {
-        showModal(RequestRenderErrorModal, {
-          request,
-          error: err,
-        });
-      } else {
-        showAlert({
-          title: 'Unexpected Request Failure',
-          message: (
-            <div>
-              <p>The request failed due to an unhandled error:</p>
-              <code className="wide selectable">
-                <pre>{err.message}</pre>
-              </code>
-            </div>
-          ),
-        });
-      }
-    }
-  }, [environmentId, isOpen, request, workspaceId]);
+      },
+    });
+    rendered && connect({
+      url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
+      headers: rendered.headers,
+      authentication: rendered.authentication,
+      cookieJar: rendered.workspaceCookieJar,
+    });
+
+  };
 
   useDocBodyKeyboardShortcuts({
     request_send: () => handleSubmit(),
@@ -126,7 +117,7 @@ export const WebSocketActionBar: FC<ActionBarProps> = ({ request, workspaceId, e
     },
   });
 
-  const isConnectingOrClosed = readyState === ReadyState.CONNECTING || readyState === ReadyState.CLOSED;
+  const isConnectingOrClosed = !readyState;
   return (
     <>
       {!isOpen && <WebSocketIcon>WS</WebSocketIcon>}
@@ -145,11 +136,12 @@ export const WebSocketActionBar: FC<ActionBarProps> = ({ request, workspaceId, e
       >
         <StyledUrlBar>
           <OneLineEditor
+            id="websocket-url-bar"
             ref={oneLineEditorRef}
             onKeyDown={createKeybindingsHandler({
               'Enter': () => handleSubmit(),
             })}
-            readOnly={readyState === ReadyState.OPEN}
+            readOnly={readyState}
             placeholder="wss://example.com/chat"
             defaultValue={defaultValue}
             onChange={onChange}

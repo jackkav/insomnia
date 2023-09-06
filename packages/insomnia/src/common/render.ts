@@ -254,6 +254,7 @@ export async function render<T>(
           x = await templating.render(x, { context, path });
         }
       } catch (err) {
+        console.log(`Failed to render element ${path}`, x);
         if (errorMode !== KEEP_ON_ERROR) {
           throw err;
         }
@@ -316,7 +317,6 @@ export async function getRenderContext(
 
   const project = ancestors.find(isProject);
   const workspace = ancestors.find(isWorkspace);
-
   if (!workspace) {
     throw new Error('Failed to render. Could not find workspace');
   }
@@ -375,37 +375,39 @@ export async function getRenderContext(
   }
 
   // Add meta data helper function
-  const baseContext: Record<string, any> = {};
+  const baseContext: BaseRenderContext = {
+    getMeta: () => ({
+      requestId: request ? request._id : null,
+      workspaceId: workspace ? workspace._id : 'n/a',
+    }),
+    getKeysContext: () => ({
+      keyContext: keySource,
+    }),
+    getPurpose: () => purpose,
+    getExtraInfo: (key: string) => {
+      if (!Array.isArray(extraInfo)) {
+        return null;
+      }
 
-  baseContext.getMeta = () => ({
-    requestId: request ? request._id : null,
-    workspaceId: workspace ? workspace._id : 'n/a',
-  });
-
-  baseContext.getKeysContext = () => ({
-    keyContext: keySource,
-  });
-
-  baseContext.getPurpose = () => purpose;
-
-  baseContext.getExtraInfo = (key: string) => {
-    if (!Array.isArray(extraInfo)) {
-      return null;
-    }
-
-    const p = extraInfo.find(v => v.name === key);
-    return p ? p.value : null;
+      const p = extraInfo.find(v => v.name === key);
+      return p ? p.value : null;
+    },
+    getEnvironmentId: () => environmentId,
+    // It is possible for a project to not exist because this code path can be reached via Inso/insomnia-send-request which has no concept of a project.
+    getProjectId: () => project?._id,
   };
-
-  baseContext.getEnvironmentId = () => environmentId;
-
-  // It is possible for a project to not exist because this code path can be reached via Inso/insomnia-send-request which has no concept of a project.
-  baseContext.getProjectId = () => project?._id;
 
   // Generate the context we need to render
   return buildRenderContext({ ancestors, rootEnvironment, subEnvironment: subEnvironment || undefined, baseContext });
 }
-
+interface BaseRenderContext {
+  getMeta: () => {};
+  getKeysContext: () => {};
+  getPurpose: () => string | undefined;
+  getExtraInfo: (key: string) => string | null;
+  getEnvironmentId: () => string | undefined;
+  getProjectId: () => string | undefined;
+}
 interface RenderGrpcRequestOptions extends BaseRenderContextOptions, RenderRequest<GrpcRequest> {
   skipBody?: boolean;
 }

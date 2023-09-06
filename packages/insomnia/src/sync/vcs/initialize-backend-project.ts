@@ -1,24 +1,24 @@
 import { database } from '../../common/database';
 import * as models from '../../models';
-import { getStatusCandidates } from '../../models/helpers/get-status-candidates';
+import { BaseModel, canSync } from '../../models';
 import { Project } from '../../models/project';
-import { isCollection, Workspace } from '../../models/workspace';
+import { Workspace } from '../../models/workspace';
 import { WorkspaceMeta } from '../../models/workspace-meta';
+import { StatusCandidate } from '../types';
 import { VCS } from './vcs';
 
 const blankStage = {};
 
 export const initializeLocalBackendProjectAndMarkForSync = async ({ vcs, workspace }: { vcs: VCS; workspace: Workspace }) => {
-  if (!isCollection(workspace)) {
-    // Don't initialize and mark for sync unless we're in a collection
-    return;
-  }
-
   // Create local project
   await vcs.switchAndCreateBackendProjectIfNotExist(workspace._id, workspace.name);
 
   // Everything unstaged
-  const candidates = getStatusCandidates(await database.withDescendants(workspace));
+  const candidates = (await database.withDescendants(workspace)).filter(canSync).map((doc: BaseModel): StatusCandidate => ({
+    key: doc._id,
+    name: doc.name || '',
+    document: doc,
+  }));
   const status = await vcs.status(candidates, blankStage);
 
   // Stage everything

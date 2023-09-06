@@ -1,12 +1,13 @@
 import classnames from 'classnames';
-import React, { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { OverlayContainer } from 'react-aria';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import { database as db, Operation } from '../../../common/database';
 import { interceptAccessError } from '../../../sync/vcs/util';
 import { VCS } from '../../../sync/vcs/vcs';
-import { selectSyncItems } from '../../redux/selectors';
-import { type ModalHandle, Modal, ModalProps } from '../base/modal';
+import { WorkspaceLoaderData } from '../../routes/workspace';
+import { Modal, type ModalHandle, ModalProps } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalHeader } from '../base/modal-header';
 import { PromptButton } from '../base/prompt-button';
@@ -18,7 +19,6 @@ type Props = ModalProps & {
 
 interface State {
   error?: string;
-  newBranchName: string;
   currentBranch: string;
   branches: string[];
   remoteBranches: string[];
@@ -30,11 +30,10 @@ export interface SyncBranchesModalHandle {
   show: (options: SyncBranchesModalOptions) => void;
   hide: () => void;
 }
-export const SyncBranchesModal = forwardRef<SyncBranchesModalHandle, Props>(({ vcs }, ref) => {
+export const SyncBranchesModal = ({ vcs, onHide }: Props) => {
   const modalRef = useRef<ModalHandle>(null);
   const [state, setState] = useState<State>({
     error: '',
-    newBranchName: '',
     branches: [],
     remoteBranches: [],
     currentBranch: '',
@@ -69,18 +68,14 @@ export const SyncBranchesModal = forwardRef<SyncBranchesModalHandle, Props>(({ v
       }));
     }
   }, [vcs]);
-  useImperativeHandle(ref, () => ({
-    hide: () => modalRef.current?.hide(),
-    show: ({ onHide }) => {
-      setState(state => ({
-        ...state,
-        onHide,
-      }));
-      refreshState();
-      modalRef.current?.show({ onHide });
-    },
-  }), [refreshState]);
-  const syncItems = useSelector(selectSyncItems);
+  useEffect(() => {
+    modalRef.current?.show();
+    refreshState();
+  }, [refreshState]);
+
+  const {
+    syncItems,
+  } = useRouteLoaderData(':workspaceId') as WorkspaceLoaderData;
   async function handleCheckout(branch: string) {
     try {
       const delta = await vcs.checkout(syncItems, branch);
@@ -138,17 +133,18 @@ export const SyncBranchesModal = forwardRef<SyncBranchesModalHandle, Props>(({ v
     event.preventDefault();
     try {
       // Create new branch
-      const { newBranchName } = state;
+      const formData = new FormData(event.currentTarget);
+      const newBranchName = formData.get('newName') as string;
+      if (!newBranchName) {
+        return;
+      }
       await vcs.fork(newBranchName);
       // Checkout new branch
       const delta = await vcs.checkout(syncItems, newBranchName);
       await db.batchModifyDocs(delta as Operation);
       // Clear branch name and refresh things
       await refreshState();
-      setState(state => ({
-        ...state,
-        newBranchName: '',
-      }));
+
     } catch (err) {
       console.log('Failed to create', err.stack);
       setState(state => ({
@@ -157,141 +153,142 @@ export const SyncBranchesModal = forwardRef<SyncBranchesModalHandle, Props>(({ v
       }));
     }
   };
-  const { branches, remoteBranches, currentBranch, newBranchName, error } = state;
+  const { branches, remoteBranches, currentBranch, error } = state;
 
   return (
-    <Modal ref={modalRef}>
-      <ModalHeader>Branches</ModalHeader>
-      <ModalBody className="wide pad">
-        {error && (
-          <p className="notice error margin-bottom-sm no-margin-top">
-            <button className="pull-right icon" onClick={() => setState(state => ({ ...state, error: '' }))}>
-              <i className="fa fa-times" />
-            </button>
-            {error}
-          </p>
-        )}
-        <form onSubmit={handleCreate}>
-          <div className="form-row">
-            <div className="form-control form-control--outlined">
-              <label>
-                New Branch Name
-                <input
-                  type="text"
-                  onChange={event => setState(state => ({ ...state, newBranchName: event.target.value }))}
-                  placeholder="testing-branch"
-                  value={newBranchName}
-                />
-              </label>
-            </div>
-            <div className="form-control form-control--no-label width-auto">
-              <button type="submit" className="btn btn--clicky" disabled={!newBranchName}>
-                Create
+    <OverlayContainer>
+      <Modal ref={modalRef} onHide={onHide}>
+        <ModalHeader>Branches</ModalHeader>
+        <ModalBody className="wide pad">
+          {error && (
+            <p className="notice error margin-bottom-sm no-margin-top">
+              <button className="pull-right icon" onClick={() => setState(state => ({ ...state, error: '' }))}>
+                <i className="fa fa-times" />
               </button>
+              {error}
+            </p>
+          )}
+          <form onSubmit={handleCreate}>
+            <div className="form-row">
+              <div className="form-control form-control--outlined">
+                <label>
+                  New Branch Name
+                  <input
+                    type="text"
+                    name="newName"
+                    placeholder="testing-branch"
+                  />
+                </label>
+              </div>
+              <div className="form-control form-control--no-label width-auto">
+                <button type="submit" className="btn btn--clicky">
+                  Create
+                </button>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
 
-        <div className="pad-top">
-          <table className="table--fancy table--outlined">
-            <thead>
-              <tr>
-                <th className="text-left">Branches</th>
-                <th className="text-right">&nbsp;</th>
-              </tr>
-            </thead>
-            <tbody>
-              {branches.map(name => (
-                <tr key={name} className="table--no-outline-row">
-                  <td>
-                    <span
-                      className={classnames({
-                        bold: name === currentBranch,
-                      })}
-                    >
-                      {name}
-                    </span>
-                    {name === currentBranch ? (
-                      <span className="txt-sm space-left">(current)</span>
-                    ) : null}
-                    {name === 'master' && <i className="fa fa-lock space-left faint" />}
-                  </td>
-                  <td className="text-right">
-                    <PromptButton
-                      className="btn btn--micro btn--outlined space-left"
-                      doneMessage="Merged"
-                      disabled={name === currentBranch}
-                      onClick={() => handleMerge(name)}
-                    >
-                      Merge
-                    </PromptButton>
-                    <PromptButton
-                      className="btn btn--micro btn--outlined space-left"
-                      doneMessage="Deleted"
-                      disabled={name === currentBranch || name === 'master'}
-                      onClick={() => handleDelete(name)}
-                    >
-                      Delete
-                    </PromptButton>
-                    <button
-                      className="btn btn--micro btn--outlined space-left"
-                      disabled={name === currentBranch}
-                      onClick={() => handleCheckout(name)}
-                    >
-                      Checkout
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {remoteBranches.length > 0 && (
           <div className="pad-top">
             <table className="table--fancy table--outlined">
               <thead>
                 <tr>
-                  <th className="text-left">Remote Branches</th>
+                  <th className="text-left">Branches</th>
                   <th className="text-right">&nbsp;</th>
                 </tr>
               </thead>
               <tbody>
-                {remoteBranches.map(name => (
+                {branches.map(name => (
                   <tr key={name} className="table--no-outline-row">
                     <td>
-                      {name}
+                      <span
+                        className={classnames({
+                          bold: name === currentBranch,
+                        })}
+                      >
+                        {name}
+                      </span>
+                      {name === currentBranch ? (
+                        <span className="txt-sm space-left">(current)</span>
+                      ) : null}
                       {name === 'master' && <i className="fa fa-lock space-left faint" />}
                     </td>
                     <td className="text-right">
-                      {name !== 'master' && (
-                        <PromptButton
-                          className="btn btn--micro btn--outlined space-left"
-                          doneMessage="Deleted"
-                          disabled={name === currentBranch}
-                          onClick={() => handleRemoteDelete(name)}
-                        >
-                          Delete
-                        </PromptButton>
-                      )}
-                      <SyncPullButton
+                      <PromptButton
                         className="btn btn--micro btn--outlined space-left"
-                        branch={name}
-                        onPull={refreshState}
+                        doneMessage="Merged"
                         disabled={name === currentBranch}
-                        vcs={vcs}
+                        onClick={() => handleMerge(name)}
                       >
-                        Fetch
-                      </SyncPullButton>
+                        Merge
+                      </PromptButton>
+                      <PromptButton
+                        className="btn btn--micro btn--outlined space-left"
+                        doneMessage="Deleted"
+                        disabled={name === currentBranch || name === 'master'}
+                        onClick={() => handleDelete(name)}
+                      >
+                        Delete
+                      </PromptButton>
+                      <button
+                        className="btn btn--micro btn--outlined space-left"
+                        disabled={name === currentBranch}
+                        onClick={() => handleCheckout(name)}
+                      >
+                        Checkout
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </ModalBody>
-    </Modal >
+
+          {remoteBranches.length > 0 && (
+            <div className="pad-top">
+              <table className="table--fancy table--outlined">
+                <thead>
+                  <tr>
+                    <th className="text-left">Remote Branches</th>
+                    <th className="text-right">&nbsp;</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {remoteBranches.map(name => (
+                    <tr key={name} className="table--no-outline-row">
+                      <td>
+                        {name}
+                        {name === 'master' && <i className="fa fa-lock space-left faint" />}
+                      </td>
+                      <td className="text-right">
+                        {name !== 'master' && (
+                          <PromptButton
+                            className="btn btn--micro btn--outlined space-left"
+                            doneMessage="Deleted"
+                            disabled={name === currentBranch}
+                            onClick={() => handleRemoteDelete(name)}
+                          >
+                            Delete
+                          </PromptButton>
+                        )}
+                        <SyncPullButton
+                          className="btn btn--micro btn--outlined space-left"
+                          branch={name}
+                          onPull={refreshState}
+                          disabled={name === currentBranch}
+                          vcs={vcs}
+                        >
+                          Fetch
+                        </SyncPullButton>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </ModalBody>
+      </Modal>
+    </OverlayContainer>
   );
-});
+};
 SyncBranchesModal.displayName = 'SyncBranchesModal';

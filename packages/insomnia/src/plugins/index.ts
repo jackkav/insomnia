@@ -1,20 +1,19 @@
+import electron from 'electron';
 import fs from 'fs';
-import mkdirp from 'mkdirp';
 import path from 'path';
 
-import appConfig from '../../config/config.json';
 import { ParsedApiSpec } from '../common/api-specs';
-import { getDataDirectory } from '../common/electron-helpers';
-import { resolveHomePath } from '../common/misc';
 import type { PluginConfig, PluginConfigMap } from '../common/settings';
 import * as models from '../models';
 import { GrpcRequest } from '../models/grpc-request';
 import type { Request } from '../models/request';
 import type { RequestGroup } from '../models/request-group';
+import { WebSocketRequest } from '../models/websocket-request';
 import type { Workspace } from '../models/workspace';
 import type { PluginTemplateTag } from '../templating/extensions/index';
 import { showError } from '../ui/components/modals/index';
 import type { PluginTheme } from './misc';
+import themes from './themes';
 
 export interface Module {
   templateTags?: PluginTemplateTag[];
@@ -25,7 +24,6 @@ export interface Module {
   requestActions?: OmitInternal<RequestAction>[];
   workspaceActions?: OmitInternal<WorkspaceAction>[];
   documentActions?: OmitInternal<DocumentAction>[];
-  configGenerators?: OmitInternal<ConfigGenerator>[];
 }
 
 export interface Plugin {
@@ -50,7 +48,7 @@ export interface RequestGroupAction extends InternalProperties {
     context: Record<string, any>,
     models: {
       requestGroup: RequestGroup;
-      requests: (Request | GrpcRequest)[];
+      requests: (Request | GrpcRequest | WebSocketRequest)[];
     },
   ) => void | Promise<void>;
   label: string;
@@ -62,7 +60,7 @@ export interface RequestAction extends InternalProperties {
     context: Record<string, any>,
     models: {
       requestGroup?: RequestGroup;
-      request: Request | GrpcRequest;
+      request: Request | GrpcRequest | WebSocketRequest;
     },
   ) => void | Promise<void>;
   label: string;
@@ -80,17 +78,6 @@ export interface WorkspaceAction extends InternalProperties {
   ) => void | Promise<void>;
   label: string;
   icon?: string;
-}
-
-export interface ConfigGenerator extends InternalProperties {
-  label: string;
-  docsLink?: string;
-  generate: (
-    info: ParsedApiSpec,
-  ) => Promise<{
-    document?: string;
-    error?: string;
-  }>;
 }
 
 export interface DocumentAction extends InternalProperties {
@@ -118,25 +105,12 @@ export type ColorScheme = 'default' | 'light' | 'dark';
 
 let plugins: Plugin[] | null | undefined = null;
 
-let ignorePlugins: string[] = [];
-
 export async function init() {
-  clearIgnores();
   await reloadPlugins();
 }
 
-export function ignorePlugin(name: string) {
-  if (!ignorePlugins.includes(name)) {
-    ignorePlugins.push(name);
-  }
-}
-
-export function clearIgnores() {
-  ignorePlugins = [];
-}
-
 async function _traversePluginPath(
-  pluginMap: Record<string, any>,
+  pluginMap: Record<string, Plugin>,
   allPaths: string[],
   allConfigs: PluginConfigMap,
 ) {
@@ -182,8 +156,16 @@ async function _traversePluginPath(
         // Delete require cache entry and re-require
         const module = global.require(modulePath);
 
-        const pluginName = pluginJson.name;
-        pluginMap[pluginName] = _initPlugin(pluginJson || {}, module, allConfigs, modulePath);
+        pluginMap[pluginJson.name] = {
+          name: pluginJson.name,
+          description: pluginJson.description || pluginJson.insomnia.description || '',
+          version: pluginJson.version || 'unknown',
+          directory: modulePath || '',
+          config: allConfigs.hasOwnProperty(pluginJson.name)
+            ? allConfigs[pluginJson.name]
+            : { disabled: false },
+          module: module,
+        };
         console.log(`[plugin] Loaded ${modulePath}`);
       } catch (err) {
         showError({
@@ -207,10 +189,16 @@ export async function getPlugins(force = false): Promise<Plugin[]> {
     const extraPaths = settings.pluginPath
       .split(':')
       .filter(p => p)
-      .map(resolveHomePath);
+      .map(p => {
+        if (p.indexOf('~/') === 0) {
+          return path.join(process.env['HOME'] || '/', p.slice(1));
+        } else {
+          return p;
+        }
+      });
     // Make sure the default directories exist
-    const pluginPath = path.join(getDataDirectory(), 'plugins');
-    mkdirp.sync(pluginPath);
+    const pluginPath = path.join(process.env['INSOMNIA_DATA_PATH'] || (process.type === 'renderer' ? window : electron).app.getPath('userData'), 'plugins');
+    fs.mkdirSync(pluginPath, { recursive: true });
     // Also look in node_modules folder in each directory
     const basePaths = [pluginPath, ...extraPaths];
     const extendedPaths = basePaths.map(p => path.join(p, 'node_modules'));
@@ -221,26 +209,6 @@ export async function getPlugins(force = false): Promise<Plugin[]> {
     const pluginMap: Record<string, Plugin> = {
       // "name": "module"
     };
-
-    for (const p of appConfig.plugins) {
-      if (ignorePlugins.includes(p)) {
-        continue;
-      }
-
-      try {
-        const pluginJson = global.require(`${p}/package.json`);
-
-        if (ignorePlugins.includes(pluginJson.name)) {
-          continue;
-        }
-
-        const pluginModule = global.require(p);
-
-        pluginMap[pluginJson.name] = _initPlugin(pluginJson, pluginModule, allConfigs);
-      } catch (err) {
-        console.error(`[plugin] Failed to load plugin: ${p}`, err);
-      }
-    }
 
     await _traversePluginPath(pluginMap, allPaths, allConfigs);
     plugins = Object.keys(pluginMap).map(name => pluginMap[name]);
@@ -343,7 +311,37 @@ export async function getTemplateTags(): Promise<TemplateTag[]> {
 }
 
 export async function getRequestHooks(): Promise<RequestHook[]> {
-  let functions: RequestHook[] = [];
+  let functions: RequestHook[] = [{
+    plugin: {
+      name: 'default-headers',
+      description: 'Set default headers for all requests',
+      version: '0.0.0',
+      directory: '',
+      config: {
+        disabled: false,
+      },
+      module: {},
+    },
+    hook: context => {
+      const headers = context.request.getEnvironmentVariable('DEFAULT_HEADERS');
+      if (!headers) {
+        return;
+      }
+      for (const name of Object.keys(headers)) {
+        const value = headers[name];
+        if (context.request.hasHeader(name)) {
+          console.log(`[header] Skip setting default header ${name}. Already set to ${value}`);
+          continue;
+        }
+        if (value === 'null') {
+          context.request.removeHeader(name);
+          console.log(`[header] Remove default header ${name}`);
+        } else {
+          context.request.setHeader(name, value);
+          console.log(`[header] Set default header ${name}: ${value}`);
+        }
+      }
+    } }];
 
   for (const plugin of await getActivePlugins()) {
     const moreFunctions = plugin.module.requestHooks || [];
@@ -377,8 +375,19 @@ export async function getResponseHooks(): Promise<ResponseHook[]> {
 }
 
 export async function getThemes(): Promise<Theme[]> {
-  let extensions: Theme[] = [];
-
+  let extensions = themes.map(theme => ({
+    plugin: {
+      name: theme.name,
+      description: 'Built-in themes',
+      version: '0.0.0',
+      directory: '',
+      config: {
+        disabled: false,
+      },
+      module: {},
+    },
+    theme,
+  })) as Theme[];
   for (const plugin of await getActivePlugins()) {
     const themes = plugin.module.themes || [];
     extensions = [
@@ -391,46 +400,4 @@ export async function getThemes(): Promise<Theme[]> {
   }
 
   return extensions;
-}
-
-export async function getConfigGenerators(): Promise<ConfigGenerator[]> {
-  let functions: ConfigGenerator[] = [];
-
-  for (const plugin of await getActivePlugins()) {
-    const moreFunctions = plugin.module.configGenerators || [];
-    functions = [
-      ...functions,
-      ...moreFunctions.map(p => ({
-        plugin,
-        ...p,
-      })),
-    ];
-  }
-
-  return functions;
-}
-const _defaultPluginConfig: PluginConfig = {
-  disabled: false,
-};
-
-function _initPlugin(
-  packageJSON: Record<string, any>,
-  module: any,
-  allConfigs: PluginConfigMap,
-  path?: string | null,
-): Plugin {
-  const meta = packageJSON.insomnia || {};
-  const name = packageJSON.name || meta.name;
-  // Find config
-  const config: PluginConfig = allConfigs.hasOwnProperty(name)
-    ? allConfigs[name]
-    : _defaultPluginConfig;
-  return {
-    name,
-    description: packageJSON.description || meta.description || '',
-    version: packageJSON.version || 'unknown',
-    directory: path || '',
-    config,
-    module: module,
-  };
 }

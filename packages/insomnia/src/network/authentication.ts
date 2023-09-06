@@ -1,5 +1,4 @@
 import * as Hawk from 'hawk';
-import jwtAuthentication from 'jwt-authentication';
 
 import {
   AUTH_API_KEY,
@@ -63,13 +62,18 @@ export async function getAuthHeader(renderedRequest: RenderedRequest, url: strin
     // ID of "{{request_id}}.graphql". Here we are removing the .graphql suffix and
     // pretending we are fetching a token for the original request. This makes sure
     // the same tokens are used for schema fetching. See issue #835 on GitHub.
-    const tokenId = requestId.match(/\.graphql$/) ? requestId.replace(/\.graphql$/, '') : requestId;
-    const oAuth2Token = await getOAuth2Token(tokenId, authentication as AuthTypeOAuth2);
+    try {
+      const tokenId = requestId.match(/\.graphql$/) ? requestId.replace(/\.graphql$/, '') : requestId;
+      const oAuth2Token = await getOAuth2Token(tokenId, authentication as AuthTypeOAuth2);
 
-    if (oAuth2Token) {
-      const token = oAuth2Token.accessToken;
-      return _buildBearerHeader(token, authentication.tokenPrefix);
-    } else {
+      if (oAuth2Token) {
+        const token = oAuth2Token.accessToken;
+        return _buildBearerHeader(token, authentication.tokenPrefix);
+      }
+      return;
+    } catch (err) {
+      // TODO: Show this error in the UI
+      console.log('[oauth2] Failed to get token', err);
       return;
     }
   }
@@ -115,14 +119,8 @@ export async function getAuthHeader(renderedRequest: RenderedRequest, url: strin
 
   if (authentication.type === AUTH_ASAP) {
     const { issuer, subject, audience, keyId, additionalClaims, privateKey } = authentication;
-    const generator = jwtAuthentication.client.create();
-    let claims = {
-      iss: issuer,
-      sub: subject,
-      aud: audience,
-    };
-    let parsedAdditionalClaims;
 
+    let parsedAdditionalClaims;
     try {
       parsedAdditionalClaims = JSON.parse(additionalClaims || '{}');
     } catch (err) {
@@ -135,26 +133,21 @@ export async function getAuthHeader(renderedRequest: RenderedRequest, url: strin
           `additional-claims must be an object received: '${typeof parsedAdditionalClaims}' instead`,
         );
       }
-
-      claims = Object.assign(parsedAdditionalClaims, claims);
     }
-
-    const options = {
+    const generator = (await import('httplease-asap')).createAuthHeaderGenerator({
       privateKey,
-      kid: keyId,
-    };
-    return new Promise<Header>((resolve, reject) => {
-      generator.generateAuthorizationHeader(claims, options, (error, headerValue) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve({
-            name: 'Authorization',
-            value: headerValue,
-          });
-        }
-      });
+      issuer,
+      keyId,
+      audience,
+      subject,
+      additionalClaims: parsedAdditionalClaims,
+      tokenExpiryMs: 10 * 60 * 1000, // Optional, max is 1 hour. This is how long the generated token stays valid.
+      tokenMaxAgeMs: 9 * 60 * 1000, // Optional, must be less than tokenExpiryMs. How long to cache the token.
     });
+    return {
+      name: 'Authorization',
+      value: generator(),
+    };
   }
 
   return;

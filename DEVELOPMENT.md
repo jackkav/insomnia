@@ -19,10 +19,9 @@ There are a few more technologies and tools worth mentioning:
 
 ## Project Structure
 
-Insomnia uses [`lerna`](https://lerna.js.org/) to manage multiple npm packages within a single repository. There are currently two package locations:
+Insomnia uses [`npm workspaces`](https://docs.npmjs.com/cli/v9/using-npm/workspaces?v=true) to manage multiple npm packages within a single repository. There are currently the following package locations:
 
 - `/packages` contains related packages that are consumed by `insomnia` or externally.
-- `/plugins` contains plugin packages that are included by default with the application.
 
 ## The `insomnia` Main Package
 
@@ -45,8 +44,8 @@ There are a few notable directories inside it:
 Insomnia stores data in a few places:
 
 - A local in-memory NeDB database stores data for data models (requests, folder, workspaces, etc.).
-- A local Redux store contains an in-memory copy of all database entities.
-- Multiple React Context stores, defined in `/src/ui/context`.
+- localstorage
+- a fake localstorage api that writes to file and is used for window sizing
 
 > Note: NeDB is officially unmaintained (even for critical security bugs) and was last published in February 2016. Due to this, we hope to move away from it, however doing so is tricky because of how deeply tied it is to our architecture.
 
@@ -68,7 +67,37 @@ The structure for smoke tests is explained in the smoke testing package: [`packa
 This is just a brief summary of Insomnia's current technical debt.
 
 - Loading large responses (~20 MB) can crash the app on weaker hardware.
-- An in-memory duplicate of the local DB is stored in Redux.
 - Bundling `libcurl` (native module) has caused many weeks of headaches trying to get builds working across Windows, Mac, and Linux. More expertise here is definitely needed.
 - All input fields that support features like templating or code completion are actually [CodeMirror](https://codemirror.net/6/) instances. This isn't really debt, but may affect things going forward.
-- Use of `libcurl` means Insomnia can't run in a web browser and can't support bidirectional socket communication.
+
+- [x] upgrade spectral e2e testing
+- [x] upgrading electron
+- [x] preload electron main functions
+- [x] update react classes to function components
+- [x] remove excess packages
+- [x] migrate redux to remix
+- [x] migrate lerna to npm workspaces
+- [x] CI slow ~30m (now 10m)
+- [x] styling vision (react-aria + tailwind)
+- [ ] de-polymorph database
+- [ ] codemirror is unmaintained
+- [ ] nedb is unmaintained
+- [ ] grpc state state should be in main rather than renderer
+- [ ] drag and drop is flakey
+- [ ] sync code is spaghetti
+- [ ] template rendering is spaghetti and has poor discoverability
+- [ ] inso abstraction limits networking improvements
+- [ ] testing feature doesn't scale with investment
+- [ ] unify curl.ts and libcurl-promise implementations
+
+## Electron upgrade
+
+<https://releases.electronjs.org/>
+
+bump the following node and electron versions
+
+- `.npmrc`
+- `.nvmrc`
+- `packages/insomnia/package.json` electron and node-libcurl
+- `packages/insomnia-send-request/package.json` node-libcurl
+- `shell.nix`

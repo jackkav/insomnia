@@ -1,12 +1,10 @@
 import clone from 'clone';
+import electron from 'electron';
 import fs from 'fs';
-import mkdirp from 'mkdirp';
 import { join as pathJoin } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
-import { cookiesFromJar, jarFromCookies } from '../common/cookies';
 import { database as db } from '../common/database';
-import { getDataDirectory } from '../common/electron-helpers';
 import {
   getContentTypeHeader,
   getLocationHeader,
@@ -16,13 +14,11 @@ import type { ExtraRenderInfo, RenderedRequest, RenderPurpose, RequestAndContext
 import {
   getRenderedRequestAndContext,
   RENDER_PURPOSE_NO_RENDER,
-  RENDER_PURPOSE_SEND,
 } from '../common/render';
 import type { HeaderResult, ResponsePatch, ResponseTimelineEntry } from '../main/network/libcurl-promise';
 import * as models from '../models';
 import { CaCertificate } from '../models/ca-certificate';
 import { ClientCertificate } from '../models/client-certificate';
-import { Cookie } from '../models/cookie-jar';
 import type { Request, RequestAuthentication, RequestParameter } from '../models/request';
 import type { Settings } from '../models/settings';
 import { isWorkspace } from '../models/workspace';
@@ -37,71 +33,10 @@ import {
 } from '../utils/url/querystring';
 import { getAuthHeader, getAuthQueryParams } from './authentication';
 import { cancellableCurlRequest } from './cancellation';
+import { addSetCookiesToToughCookieJar } from './set-cookie-util';
 import { urlMatchesCertHost } from './url-matches-cert-host';
 
-// used for oauth grant types
-// creates a new request with the patch args
-// and uses env and settings from workspace
-// not cancellable but currently is
-// used indirectly by send and getAuthHeader to fetch tokens
-// @TODO unpack oauth into regular timeline and remove oauth timeine dialog
-export async function sendWithSettings(
-  requestId: string,
-  requestPatch: Record<string, any>,
-) {
-  console.log(`[network] Sending with settings req=${requestId}`);
-  const { request,
-    environment,
-    settings,
-    clientCertificates,
-    caCert,
-    activeEnvironmentId } = await fetchRequestData(requestId);
-
-  const newRequest: Request = await models.initModel(models.request.type, requestPatch, {
-    _id: request._id + '.other',
-    parentId: request._id,
-  });
-
-  const renderResult = await tryToInterpolateRequest(newRequest, environment._id);
-  const renderedRequest = await tryToTransformRequestWithPlugins(renderResult);
-
-  const response = await sendCurlAndWriteTimeline(
-    renderResult.request,
-    clientCertificates,
-    caCert,
-    { ...settings, validateSSL: settings.validateAuthSSL },
-  );
-  return responseTransform(response, activeEnvironmentId, renderedRequest, renderResult.context);
-}
-
-// used by test feature, inso, and plugin api
-// not all need to be cancellable or to use curl
-export async function send(
-  requestId: string,
-  environmentId?: string,
-  extraInfo?: ExtraRenderInfo,
-) {
-  console.log(`[network] Sending req=${requestId} env=${environmentId || 'null'}`);
-
-  const { request,
-    environment,
-    settings,
-    clientCertificates,
-    caCert,
-    activeEnvironmentId } = await fetchRequestData(requestId);
-
-  const renderResult = await tryToInterpolateRequest(request, environment._id, RENDER_PURPOSE_SEND, extraInfo);
-  const renderedRequest = await tryToTransformRequestWithPlugins(renderResult);
-  const response = await sendCurlAndWriteTimeline(
-    renderedRequest,
-    clientCertificates,
-    caCert,
-    settings,
-  );
-  return responseTransform(response, activeEnvironmentId, renderedRequest, renderResult.context);
-}
-
-const fetchRequestData = async (requestId: string) => {
+export const fetchRequestData = async (requestId: string) => {
   const request = await models.request.getById(requestId);
   invariant(request, 'failed to find request');
   const ancestors = await db.withAncestors(request, [
@@ -117,10 +52,9 @@ const fetchRequestData = async (requestId: string) => {
 
   // fallback to base environment
   const activeEnvironmentId = workspaceMeta.activeEnvironmentId;
-  const environment = activeEnvironmentId ?
-    await models.environment.getById(activeEnvironmentId)
-    : await models.environment.getOrCreateForParentId(workspace._id);
-  invariant(environment, 'failed to find environment');
+  const activeEnvironment = activeEnvironmentId && await models.environment.getById(activeEnvironmentId);
+  const environment = activeEnvironment || await models.environment.getOrCreateForParentId(workspace._id);
+  invariant(environment, 'failed to find environment ' + activeEnvironmentId);
 
   const settings = await models.settings.getOrCreate();
   invariant(settings, 'failed to create settings');
@@ -139,6 +73,9 @@ export const tryToInterpolateRequest = async (request: Request, environmentId: s
       extraInfo,
     });
   } catch (err) {
+    if ('type' in err && err.type === 'render') {
+      throw err;
+    }
     throw new Error(`Failed to render request: ${request._id}`);
   }
 };
@@ -223,8 +160,8 @@ export async function sendCurlAndWriteTimeline(
     ...patch,
   };
 }
-export const responseTransform = (patch: ResponsePatch, environmentId: string | null, renderedRequest: RenderedRequest, context: Record<string, any>) => {
-  const response = {
+export const responseTransform = async (patch: ResponsePatch, environmentId: string | null, renderedRequest: RenderedRequest, context: Record<string, any>) => {
+  const response: ResponsePatch = {
     ...patch,
     // important for filter by responses
     environmentId,
@@ -238,7 +175,7 @@ export const responseTransform = (patch: ResponsePatch, environmentId: string | 
     return response;
   }
   console.log(`[network] Response succeeded req=${patch.parentId} status=${response.statusCode || '?'}`,);
-  return _applyResponsePluginHooks(
+  return await _applyResponsePluginHooks(
     response,
     renderedRequest,
     context,
@@ -296,22 +233,6 @@ export const getCurrentUrl = ({ headerResults, finalUrl }: { headerResults: any;
   }
 };
 
-export const addSetCookiesToToughCookieJar = async ({ setCookieStrings, currentUrl, cookieJar }: any) => {
-  const rejectedCookies: string[] = [];
-  const jar = jarFromCookies(cookieJar.cookies);
-  for (const setCookieStr of setCookieStrings) {
-    try {
-      jar.setCookieSync(setCookieStr, currentUrl);
-    } catch (err) {
-      if (err instanceof Error) {
-        rejectedCookies.push(err.message);
-      }
-    }
-  }
-  const cookies = (await cookiesFromJar(jar)) as Cookie[];
-  return { cookies, rejectedCookies };
-};
-
 async function _applyRequestPluginHooks(
   renderedRequest: RenderedRequest,
   renderedContext: Record<string, any>,
@@ -324,7 +245,7 @@ async function _applyRequestPluginHooks(
       ...pluginContexts.data.init(renderedContext.getProjectId()),
       ...(pluginContexts.store.init(plugin) as Record<string, any>),
       ...(pluginContexts.request.init(newRenderedRequest, renderedContext) as Record<string, any>),
-      ...(pluginContexts.network.init(renderedContext.getEnvironmentId()) as Record<string, any>),
+      ...(pluginContexts.network.init() as Record<string, any>),
     };
 
     try {
@@ -346,7 +267,6 @@ async function _applyResponsePluginHooks(
   try {
     const newResponse = clone(response);
     const newRequest = clone(renderedRequest);
-
     for (const { plugin, hook } of await plugins.getResponseHooks()) {
       const context = {
         ...(pluginContexts.app.init(RENDER_PURPOSE_NO_RENDER) as Record<string, any>),
@@ -354,7 +274,7 @@ async function _applyResponsePluginHooks(
         ...(pluginContexts.store.init(plugin) as Record<string, any>),
         ...(pluginContexts.response.init(newResponse) as Record<string, any>),
         ...(pluginContexts.request.init(newRequest, renderedContext, true) as Record<string, any>),
-        ...(pluginContexts.network.init(renderedContext.getEnvironmentId()) as Record<string, any>),
+        ...(pluginContexts.network.init() as Record<string, any>),
       };
 
       try {
@@ -367,9 +287,10 @@ async function _applyResponsePluginHooks(
 
     return newResponse;
   } catch (err) {
+    console.log('[plugin] Response hook failed', err, response);
     return {
       url: renderedRequest.url,
-      error: `[plugin] Response hook failed plugin=${err.plugin.name} err=${err.message}`,
+      error: `[plugin] Response hook failed plugin=${err.plugin?.name} err=${err.message}`,
       elapsedTime: 0, // 0 because this path is hit during plugin calls
       statusMessage: 'Error',
       settingSendCookies: renderedRequest.settingSendCookies,
@@ -382,8 +303,10 @@ async function _applyResponsePluginHooks(
 export function storeTimeline(timeline: ResponseTimelineEntry[]): Promise<string> {
   const timelineStr = JSON.stringify(timeline, null, '\t');
   const timelineHash = uuidv4();
-  const responsesDir = pathJoin(getDataDirectory(), 'responses');
-  mkdirp.sync(responsesDir);
+  const responsesDir = pathJoin(process.env['INSOMNIA_DATA_PATH'] || (process.type === 'renderer' ? window : electron).app.getPath('userData'), 'responses');
+
+  fs.mkdirSync(responsesDir, { recursive: true });
+
   const timelinePath = pathJoin(responsesDir, timelineHash + '.timeline');
   if (process.type === 'renderer') {
     return window.main.writeFile({ path: timelinePath, content: timelineStr });

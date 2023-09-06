@@ -1,8 +1,5 @@
-import { unreachableCase } from 'ts-assert-unreachable';
-
 import appConfig from '../../config/config.json';
 import { version } from '../../package.json';
-import { getPortableExecutableDir } from './electron-helpers';
 import { KeyCombination } from './settings';
 
 const env = process['env'];
@@ -52,7 +49,7 @@ export function updatesSupported() {
   }
 
   // Updates are not supported for Windows portable binaries
-  if (isWindows() && getPortableExecutableDir()) {
+  if (isWindows() && process.env['PORTABLE_EXECUTABLE_DIR']) {
     return false;
   }
 
@@ -60,7 +57,7 @@ export function updatesSupported() {
 }
 
 export const getClientString = () => `${getAppEnvironment()}::${getAppPlatform()}::${getAppVersion()}`;
-export const changelogUrl = () => appConfig.changelogUrl;
+export const changelogUrl = () => appConfig.changelogUrl + '#' + version;
 
 // Global Stuff
 export const DB_PERSIST_INTERVAL = 1000 * 60 * 30; // Compact every once in a while
@@ -123,7 +120,7 @@ export const displayModifierKey = (key: keyof Omit<KeyCombination, 'keyCode'>) =
       return 'Super';
 
     default:
-      return unreachableCase(key, 'unrecognized key');
+      throw new Error(key + 'unrecognized key');
   }
 };
 
@@ -135,6 +132,8 @@ export enum UpdateURL {
 
 // API
 export const getApiBaseURL = () => env.INSOMNIA_API_URL || 'https://api.insomnia.rest';
+
+export const getUpdatesBaseURL = () => env.INSOMNIA_UPDATES_URL || 'https://updates.insomnia.rest';
 
 // App website
 export const getAppWebsiteBaseURL = () => env.INSOMNIA_APP_WEBSITE_URL || 'https://app.insomnia.rest';
@@ -256,6 +255,7 @@ export const CONTENT_TYPE_JSON = 'application/json';
 export const CONTENT_TYPE_PLAINTEXT = 'text/plain';
 export const CONTENT_TYPE_XML = 'application/xml';
 export const CONTENT_TYPE_YAML = 'text/yaml';
+export const CONTENT_TYPE_EVENT_STREAM = 'text/event-stream';
 export const CONTENT_TYPE_EDN = 'application/edn';
 export const CONTENT_TYPE_FORM_URLENCODED = 'application/x-www-form-urlencoded';
 export const CONTENT_TYPE_FORM_DATA = 'multipart/form-data';
@@ -317,7 +317,8 @@ export type SortOrder =
   | 'created-desc'
   | 'http-method'
   | 'type-desc'
-  | 'type-asc';
+  | 'type-asc'
+  | 'type-manual';
 export const SORT_NAME_ASC = 'name-asc';
 export const SORT_NAME_DESC = 'name-desc';
 export const SORT_CREATED_ASC = 'created-asc';
@@ -327,7 +328,9 @@ export const SORT_MODIFIED_DESC = 'modified-desc';
 export const SORT_HTTP_METHOD = 'http-method';
 export const SORT_TYPE_DESC = 'type-desc';
 export const SORT_TYPE_ASC = 'type-asc';
+export const SORT_TYPE_MANUAL = 'type-manual';
 export const SORT_ORDERS = [
+  SORT_TYPE_MANUAL,
   SORT_NAME_ASC,
   SORT_NAME_DESC,
   SORT_CREATED_ASC,
@@ -337,6 +340,7 @@ export const SORT_ORDERS = [
   SORT_TYPE_ASC,
 ] as const;
 export const sortOrderName: Record<SortOrder, string> = {
+  [SORT_TYPE_MANUAL]: 'Manual',
   [SORT_NAME_ASC]: 'Name Ascending (A-Z)',
   [SORT_NAME_DESC]: 'Name Descending (Z-A)',
   [SORT_CREATED_ASC]: 'Oldest First',
@@ -477,8 +481,11 @@ export const RESPONSE_CODE_DESCRIPTIONS: Record<number, string> = {
   506: 'The server has an internal configuration error: transparent content negotiation for the request results in a circular reference.',
   507: 'The server has an internal configuration error: the chosen variant resource is configured to engage in transparent content negotiation itself, and is therefore not a proper end point in the negotiation process.',
   508: 'The server detected an infinite loop while processing the request.',
+  509: 'The server has exceeded the bandwidth specified by the server administrator; this is often used by shared hosting providers to limit the bandwidth of customers.',
   510: 'Further extensions to the request are required for the server to fulfill it.',
   511: 'The 511 status code indicates that the client needs to authenticate to gain network access.',
+  598: 'Used by some HTTP proxies to signal a network read timeout behind the proxy to a client in front of the proxy.',
+  599: 'An error used by some HTTP proxies to signal a network connect timeout behind the proxy to a client in front of the proxy.',
 };
 
 export const RESPONSE_CODE_REASONS: Record<number, string> = {
@@ -548,8 +555,11 @@ export const RESPONSE_CODE_REASONS: Record<number, string> = {
   506: 'Variant Also Negotiates',
   507: 'Insufficient Storage',
   508: 'Loop Detected',
+  509: 'Bandwidth Limit Exceeded',
   510: 'Not Extended',
   511: 'Network Authentication Required',
+  598: 'Network read timeout error',
+  599: 'Network Connect Timeout Error',
 };
 
 export const WORKSPACE_ID_KEY = '__WORKSPACE_ID__';

@@ -18,24 +18,24 @@ test.describe('Plugins', async () => {
   });
 
   test('Check Declarative Config and Kong Kubernetes config', async ({ page }) => {
-    // Switch to design tab
-    await page.click('text=Design');
+    await page.getByRole('button', { name: 'New Document' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
 
     // Set example OpenAPI spec
     await page.click('text=start from an example');
     await expect(page.locator('.app')).toContainText('This is a sample server Petstore server');
 
     // Open declarative config
-    await page.getByRole('button', { name: 'New Document' }).click();
+    await page.getByTestId('workspace-dropdown').locator('button').click();
     await page.getByRole('menuitem', { name: 'Declarative Config (Legacy)' }).click();
     // Check for declarative config contents
-    await page.click('text=/.*"_format_version".*/');
+    await page.getByText('_format_version').click();
 
     // Switch to Kong for Kubernetes tab
     await page.click('div[role="tab"]:has-text("Kong for Kubernetes")');
 
     // Check for Kong for Kubernetes contents
-    await page.click('text=apiVersion: networking.k8s.io/v1');
+    await page.getByText('apiVersion: networking.k8s.io/v1').click();
   });
 
   // TODO: more scenarios will be added in follow-up iterations of increasing test coverage

@@ -83,9 +83,13 @@ export function init(): BaseResponse {
   };
 }
 
-export async function migrate(doc: Response) {
-  doc = await migrateBodyCompression(doc);
-  return doc;
+export function migrate(doc: Response) {
+  try {
+    return migrateBodyCompression(doc);
+  } catch (e) {
+    console.log('[db] Error during response migration', e);
+    throw e;
+  }
 }
 
 export function hookDatabaseInit(consoleLog: typeof console.log = console.log) {
@@ -103,6 +107,10 @@ export function hookRemove(doc: Response, consoleLog: typeof console.log = conso
 
 export function getById(id: string) {
   return db.get<Response>(type, id);
+}
+
+export function findByParentId(parentId: string) {
+  return db.find<Response>(type, { parentId: parentId });
 }
 
 export async function all() {
@@ -159,6 +167,7 @@ export async function getLatestForRequest(
 
 export async function create(patch: Partial<Response> = {}, maxResponses = 20): Promise<Response> {
   if (!patch.parentId) {
+    console.log('[db] Attempted to create response without `parentId`', patch);
     throw new Error('New Response missing `parentId`');
   }
 
@@ -246,6 +255,7 @@ export function getTimeline(response: Response, showBody?: boolean) {
     const rawBuffer = fs.readFileSync(timelinePath);
     const timelineString = rawBuffer.toString();
     const timeline = JSON.parse(timelineString) as ResponseTimelineEntry[];
+
     const body: ResponseTimelineEntry[] = showBody ? [
       {
         name: 'DataOut',

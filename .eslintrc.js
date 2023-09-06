@@ -12,16 +12,11 @@ const {
 module.exports = {
   settings: {
     react: {
-      version: '17.0.2', // note: remember to always keep this in sync with `"react": "^17.0.2",` which is present in any package.json of a project using React.
+      version: 'detect',
     },
   },
   parser: '@typescript-eslint/parser',
   parserOptions: {
-    project: [
-      './tsconfig.eslint.json',
-      './packages/*/tsconfig.json',
-      './plugins/*/tsconfig.json',
-    ],
     tsconfigRootDir: __dirname,
     ecmaFeatures: {
       jsx: true,
@@ -73,15 +68,12 @@ module.exports = {
     'array-bracket-spacing': ERROR,
     'brace-style': SUCCESSOR(TYPESCRIPT_EXTENSION),
     'block-spacing': ERROR,
-    'camelcase': [ERROR, { allow: ['__export_format', '__export_date', '__export_source'] }],
     'comma-dangle': [ERROR, 'always-multiline'],
     'comma-spacing': ERROR,
     'consistent-return': OFF('found to be too many false positives'),
     'curly': ERROR,
     'default-case': ERROR,
     'default-case-last': ERROR,
-    'filenames/match-exported': [ERROR, 'kebab'],
-    'indent': [ERROR, 2, { SwitchCase: 1 }],
     'eol-last': [ERROR, 'always'],
     'eqeqeq': [ERROR, 'smart'],
     'arrow-parens': [ERROR, 'as-needed'],
@@ -113,17 +105,15 @@ module.exports = {
       ],
     }],
 
-    'react/no-find-dom-node': OFF(UNKNOWN),
     'react/no-unescaped-entities': OFF(TYPESCRIPT_CONVERSION),
     'react/jsx-first-prop-new-line': [ERROR, 'multiline'],
     'react/jsx-max-props-per-line': [ERROR, { maximum: 1, when: 'multiline' }],
     'react/jsx-uses-react': ERROR,
     'react/jsx-uses-vars': ERROR,
-    'react/jsx-indent': [ERROR, 2],
     'react/jsx-indent-props': [ERROR, 2],
     'react/prop-types': OFF(UNKNOWN),
     'react/function-component-definition': [ERROR, {
-      'namedComponents':  'arrow-function',
+      'namedComponents': 'arrow-function',
       'unnamedComponents': 'arrow-function',
     }],
     'react/jsx-closing-bracket-location': [ERROR, 'line-aligned'],
@@ -150,11 +140,19 @@ module.exports = {
     '@typescript-eslint/no-namespace': [ERROR, { allowDeclarations: true }],
     '@typescript-eslint/no-redeclare': ERROR,
     '@typescript-eslint/no-unused-vars': [ERROR, { ignoreRestSiblings: true }],
-    '@typescript-eslint/no-use-before-define': ERROR,
     '@typescript-eslint/space-infix-ops': ERROR,
     '@typescript-eslint/semi': [ERROR, 'always'],
     '@typescript-eslint/quotes': [ERROR, 'single', { avoidEscape: true }],
 
     'simple-import-sort/imports': ERROR,
+    'filenames/match-exported': OFF(UNKNOWN),
+    camelcase: OFF(UNKNOWN),
+    '@typescript-eslint/no-use-before-define': OFF(TYPESCRIPT_CONVERSION),
+    '@typescript-eslint/no-explicit-any': OFF(TYPESCRIPT_CONVERSION),
+    'react/no-find-dom-node': OFF(UNKNOWN),
+    'no-restricted-properties': [ERROR, {
+      property: 'openExternal',
+      message: 'use the `window.main.openInBrowser` function instead.  see https://security.stackexchange.com/questions/225799/dangers-of-electrons-shell-openexternal-on-untrusted-content for more information.',
+    }],
   },
 };

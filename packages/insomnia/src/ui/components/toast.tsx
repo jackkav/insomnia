@@ -1,10 +1,8 @@
 import classnames from 'classnames';
 import type { IpcRendererEvent } from 'electron';
-import { ipcRenderer } from 'electron';
 import React, { FC, useEffect, useState } from 'react';
 import styled from 'styled-components';
 
-import * as fetch from '../../account/fetch';
 import * as session from '../../account/session';
 import {
   getAppId,
@@ -88,23 +86,16 @@ export const Toast: FC = () => {
     }
     const stats = await models.stats.get();
     const {
-      allowNotificationRequests,
-      disablePaidFeatureAds,
       disableUpdateNotification,
       updateAutomatically,
       updateChannel,
     } = await models.settings.getOrCreate();
-    if (!allowNotificationRequests) {
-      // if the user has specifically said they don't want to send notification requests, then exit early
-      return;
-    }
     let updatedNotification: ToastNotification | null = null;
     // Try fetching user notification
     try {
       const data = {
         app: getAppId(),
         autoUpdatesDisabled: !updateAutomatically,
-        disablePaidFeatureAds,
         disableUpdateNotification,
         firstLaunch: stats.created,
         launches: stats.launches, // Used for account verification notifications
@@ -113,7 +104,12 @@ export const Toast: FC = () => {
         updatesNotSupported: !updatesSupported(),
         version: getAppVersion(),
       };
-      const notificationOrEmpty = await fetch.post<ToastNotification>('/notification', data, session.getCurrentSessionId());
+      const notificationOrEmpty = await window.main.insomniaFetch<ToastNotification>({
+        method: 'POST',
+        path: '/notification',
+        data,
+        sessionId: session.getCurrentSessionId(),
+      });
       if (notificationOrEmpty && typeof notificationOrEmpty !== 'string') {
         updatedNotification = notificationOrEmpty;
       }
@@ -124,11 +120,8 @@ export const Toast: FC = () => {
   };
 
   useEffect(() => {
-    const showNotification = (_: IpcRendererEvent, notification: ToastNotification) => handleNotification(notification);
-    ipcRenderer.on('show-notification', showNotification);
-    return () => {
-      ipcRenderer.removeListener('show-notification', showNotification);
-    };
+    const unsubscribe = window.main.on('show-notification', (_: IpcRendererEvent, notification: ToastNotification) => handleNotification(notification));
+    return () => unsubscribe();
   }, []);
 
   const productName = getProductName();

@@ -1,25 +1,23 @@
 import * as path from 'path';
 import React, { FC, useEffect, useState } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import {
   NPM_PACKAGE_BASE,
   PLUGIN_HUB_BASE,
 } from '../../../common/constants';
 import { docsPlugins } from '../../../common/documentation';
-import { clickLink, getDataDirectory } from '../../../common/electron-helpers';
-import * as models from '../../../models';
 import { createPlugin } from '../../../plugins/create';
 import type { Plugin } from '../../../plugins/index';
 import { getPlugins } from '../../../plugins/index';
 import { reload } from '../../../templating/index';
-import { selectSettings } from '../../redux/selectors';
+import { useSettingsPatcher } from '../../hooks/use-request';
+import { RootLoaderData } from '../../routes/root';
 import { CopyButton } from '../base/copy-button';
 import { Link } from '../base/link';
 import { HelpTooltip } from '../help-tooltip';
 import { showAlert, showPrompt } from '../modals';
 import { Button } from '../themed-button';
-
 interface State {
   plugins: Plugin[];
   npmPluginValue: string;
@@ -45,7 +43,9 @@ export const Plugins: FC = () => {
     isRefreshingPlugins,
     npmPluginValue,
   } = state;
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
 
   useEffect(() => {
     refreshPlugins();
@@ -59,6 +59,7 @@ export const Plugins: FC = () => {
 
     setState(state => ({ ...state, plugins, isRefreshingPlugins: false }));
   }
+  const patchSettings = useSettingsPatcher();
 
   return (
     <div>
@@ -91,9 +92,7 @@ export const Plugins: FC = () => {
                       onChange={async event => {
                         const newConfig = { ...plugin.config, disabled: !event.target.checked };
                         setState(state => ({ ...state, isRefreshingPlugins: true }));
-                        await models.settings.update(settings, {
-                          pluginConfig: { ...settings.pluginConfig, [plugin.name]: newConfig },
-                        });
+                        patchSettings({ pluginConfig: { ...settings.pluginConfig, [plugin.name]: newConfig } });
                         refreshPlugins();
                       }}
                     />
@@ -206,7 +205,7 @@ export const Plugins: FC = () => {
       <hr />
       <div className="text-right">
         <Button
-          onClick={() => clickLink(PLUGIN_HUB_BASE)}
+          onClick={() => window.main.openInBrowser(PLUGIN_HUB_BASE)}
         >
           Browse Plugin Hub
         </Button>
@@ -252,7 +251,7 @@ export const Plugins: FC = () => {
           style={{
             marginLeft: '0.3em',
           }}
-          onClick={() => window.shell.showItemInFolder(path.join(getDataDirectory(), 'plugins'))}
+          onClick={() => window.shell.showItemInFolder(path.join(process.env['INSOMNIA_DATA_PATH'] || window.app.getPath('userData'), 'plugins'))}
         >
           Reveal Plugins Folder
         </Button>

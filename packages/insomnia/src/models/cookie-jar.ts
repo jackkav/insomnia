@@ -49,8 +49,13 @@ export function init() {
 }
 
 export function migrate(doc: CookieJar) {
-  doc = migrateCookieId(doc);
-  return doc;
+  try {
+    doc = migrateCookieId(doc);
+    return doc;
+  } catch (e) {
+    console.log('[db] Error during cookie jar migration', e);
+    throw e;
+  }
 }
 
 export async function create(patch: Partial<CookieJar>) {
@@ -80,7 +85,7 @@ export async function all() {
   return db.all<BaseModel>(type);
 }
 
-export async function getById(id: string) {
+export async function getById(id: string): Promise<CookieJar | null> {
   return db.get(type, id);
 }
 

@@ -1,22 +1,24 @@
 import { ChangeEvent, useCallback, useState } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 import { useAsync } from 'react-use';
-import { unreachableCase } from 'ts-assert-unreachable';
 
-import * as models from '../../models';
 import { ThemeSettings } from '../../models/settings';
 import { ColorScheme, getThemes } from '../../plugins';
 import { applyColorScheme, PluginTheme } from '../../plugins/misc';
-import { selectSettings } from '../redux/selectors';
+import { RootLoaderData } from '../routes/root';
+import { useSettingsPatcher } from './use-request';
 
 export const useThemes = () => {
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
   const {
     lightTheme,
     darkTheme,
     autoDetectColorScheme,
     theme,
     pluginConfig,
-  } = useSelector(selectSettings);
+  } = settings;
 
   const [themes, setThemes] = useState<PluginTheme[]>([]);
 
@@ -36,6 +38,7 @@ export const useThemes = () => {
     }
     return pluginTheme.name === theme;
   }, [autoDetectColorScheme, isActiveDark, isActiveLight, theme]);
+  const patchSettings = useSettingsPatcher();
 
   // Apply the theme and update settings
   const apply = useCallback(async (patch: Partial<ThemeSettings>) => {
@@ -46,8 +49,9 @@ export const useThemes = () => {
       lightTheme,
       ...patch,
     });
-    await models.settings.patch(patch);
-  }, [autoDetectColorScheme, darkTheme, lightTheme, theme]);
+    patchSettings(patch);
+
+  }, [autoDetectColorScheme, darkTheme, lightTheme, patchSettings, theme]);
 
   const changeAutoDetect = useCallback(({ target: { checked } }: ChangeEvent<HTMLInputElement>) => apply({ autoDetectColorScheme: checked }), [apply]);
 
@@ -67,7 +71,7 @@ export const useThemes = () => {
         break;
 
       default:
-        unreachableCase(colorScheme);
+        throw new Error(colorScheme);
     }
   }, [apply]);
 

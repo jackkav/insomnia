@@ -3,11 +3,11 @@ import type { MainBridgeAPI } from './main/ipc/main';
 
 declare global {
   interface Window {
-    __REDUX_DEVTOOLS_EXTENSION_COMPOSE__: Function;
     main: MainBridgeAPI;
     dialog: Pick<Electron.Dialog, 'showOpenDialog' | 'showSaveDialog'>;
     app: Pick<Electron.App, 'getPath' | 'getAppPath'>;
     shell: Pick<Electron.Shell, 'showItemInFolder'>;
+    clipboard: Pick<Electron.Clipboard, 'readText' | 'writeText' | 'clear'>;
   }
 }
 

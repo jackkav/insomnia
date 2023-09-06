@@ -1,5 +1,5 @@
-import React, { FC, useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import React, { FC } from 'react';
+import { useParams, useRouteLoaderData } from 'react-router-dom';
 
 import {
   CONTENT_TYPE_EDN,
@@ -13,29 +13,24 @@ import {
   CONTENT_TYPE_XML,
   CONTENT_TYPE_YAML,
   getContentTypeName,
+  METHOD_POST,
 } from '../../../common/constants';
-import { isWebSocketRequest } from '../../../models/websocket-request';
-import { SegmentEvent, trackSegmentEvent } from '../../analytics';
-import { selectActiveRequest } from '../../redux/selectors';
+import { Request, RequestBody, RequestHeader, RequestParameter } from '../../../models/request';
+import { deconstructQueryStringToParams } from '../../../utils/url/querystring';
+import { SegmentEvent } from '../../analytics';
+import { useRequestPatcher } from '../../hooks/use-request';
+import { RequestLoaderData } from '../../routes/request';
 import { Dropdown, DropdownButton, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
 import { AlertModal } from '../modals/alert-modal';
 import { showModal } from '../modals/index';
 
-interface Props {
-  onChange: (mimeType: string | null) => void;
-}
-
 const EMPTY_MIME_TYPE = null;
 
-export const ContentTypeDropdown: FC<Props> = ({ onChange }) => {
-  const request = useSelector(selectActiveRequest);
-  const activeRequest = request && !isWebSocketRequest(request) ? request : null;
-
-  const handleChangeMimeType = useCallback(async (mimeType: string | null) => {
-    if (!activeRequest) {
-      return;
-    }
-
+export const ContentTypeDropdown: FC = () => {
+  const { activeRequest } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
+  const patchRequest = useRequestPatcher();
+  const { requestId } = useParams() as { requestId: string };
+  const handleChangeMimeType = async (mimeType: string | null) => {
     const { body } = activeRequest;
     const hasMimeType = 'mimeType' in body;
     if (hasMimeType && body.mimeType === mimeType) {
@@ -65,14 +60,10 @@ export const ContentTypeDropdown: FC<Props> = ({ onChange }) => {
         addCancel: true,
       });
     }
+    patchRequest(requestId, { body: { mimeType } });
+    window.main.trackSegmentEvent({ event: SegmentEvent.requestBodyTypeSelect, properties: { type: mimeType } });
+  };
 
-    onChange(mimeType);
-    trackSegmentEvent(SegmentEvent.requestBodyTypeSelect, { type: mimeType });
-  }, [onChange, activeRequest]);
-
-  if (!activeRequest) {
-    return null;
-  }
   const { body } = activeRequest;
   const hasMimeType = 'mimeType' in body;
   const hasParams = body && 'params' in body && body.params;
@@ -204,4 +195,61 @@ export const ContentTypeDropdown: FC<Props> = ({ onChange }) => {
       </DropdownSection>
     </Dropdown>
   );
+};
+export function newBodyGraphQL(rawBody: string): RequestBody {
+  try {
+    // Only strip the newlines if rawBody is a parsable JSON
+    JSON.parse(rawBody);
+    return {
+      mimeType: CONTENT_TYPE_GRAPHQL,
+      text: rawBody.replace(/\\\\n/g, ''),
+    };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return {
+        mimeType: CONTENT_TYPE_GRAPHQL,
+        text: rawBody,
+      };
+    } else {
+      throw error;
+    }
+  }
+}
+
+export const updateMimeType = (
+  request: Request,
+  mimeType: string | null,
+): { body: RequestBody; headers: RequestHeader[]; params?: RequestParameter[]; method?: string } => {
+  const withoutContentType = request.headers.filter(h => h?.name?.toLowerCase() !== 'content-type');
+  // 'No body' selected
+  if (typeof mimeType !== 'string') {
+    return {
+      body: {},
+      headers: withoutContentType,
+    };
+  }
+  if (mimeType === CONTENT_TYPE_GRAPHQL) {
+    return {
+      body: newBodyGraphQL(request.body.text || ''),
+      headers: [{ name: 'Content-Type', value: CONTENT_TYPE_JSON }, ...withoutContentType],
+      method: METHOD_POST,
+    };
+  }
+  if (mimeType === CONTENT_TYPE_FORM_URLENCODED || mimeType === CONTENT_TYPE_FORM_DATA) {
+    const params = request.body.params || deconstructQueryStringToParams(request.body.text);
+    return {
+      body: { mimeType, params },
+      headers: [{ name: 'Content-Type', value: mimeType || '' }, ...withoutContentType],
+    };
+  }
+  if (mimeType === CONTENT_TYPE_FILE) {
+    return {
+      body: { mimeType, fileName: '' },
+      headers: [{ name: 'Content-Type', value: mimeType || '' }, ...withoutContentType],
+    };
+  }
+  return {
+    body: { mimeType: mimeType.split(';')[0], text: request.body.text || '' },
+    headers: [{ name: 'Content-Type', value: mimeType || '' }, ...withoutContentType],
+  };
 };

@@ -4,7 +4,7 @@ import classnames from 'classnames';
 import clone from 'clone';
 import CodeMirror, { EditorConfiguration } from 'codemirror';
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 import { useMount, useUnmount } from 'react-use';
 
 import { DEBOUNCE_MILLIS } from '../../../common/constants';
@@ -13,19 +13,18 @@ import { KeyCombination } from '../../../common/settings';
 import { getTagDefinitions } from '../../../templating/index';
 import { NunjucksParsedTag } from '../../../templating/utils';
 import { useNunjucks } from '../../context/nunjucks/use-nunjucks';
-import { selectSettings } from '../../redux/selectors';
+import { RootLoaderData } from '../../routes/root';
 import { isKeyCombinationInRegistry } from '../settings/shortcuts';
-
 export interface OneLineEditorProps {
   defaultValue: string;
   getAutocompleteConstants?: () => string[] | PromiseLike<string[]>;
-  id?: string;
+  id: string;
   onChange: (value: string) => void;
   onKeyDown?: (event: KeyboardEvent, value: string) => void;
-  onPaste?: (event: ClipboardEvent) => void;
   placeholder?: string;
   readOnly?: boolean;
   type?: string;
+  onPaste?: (text: string) => void;
 }
 
 export interface OneLineEditorHandle {
@@ -38,14 +37,16 @@ export const OneLineEditor = forwardRef<OneLineEditorHandle, OneLineEditorProps>
   id,
   onChange,
   onKeyDown,
-  onPaste,
   placeholder,
   readOnly,
   type,
+  onPaste,
 }, ref) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const codeMirror = useRef<CodeMirror.EditorFromTextArea | null>(null);
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
   const { handleRender, handleGetRenderContext } = useNunjucks();
 
   useMount(() => {
@@ -107,8 +108,19 @@ export const OneLineEditor = forwardRef<OneLineEditorHandle, OneLineEditorProps>
     codeMirror.current.on('beforeChange', (_: CodeMirror.Editor, change: CodeMirror.EditorChangeCancellable) => {
       const isPaste = change.text && change.text.length > 1;
       if (isPaste) {
+        if (change.text[0].startsWith('curl')) {
+          change.cancel();
+          return;
+        }
         // If we're in single-line mode, merge all changed lines into one
         change.update?.(change.from, change.to, [change.text.join('').replace(/\n/g, ' ')]);
+      }
+    });
+    codeMirror.current.on('paste', (_, e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text/plain');
+      // TODO: watch out for pasting urls that are curl<something>, e.g. curl.se would be picked up here without the space
+      if (onPaste && text && text.startsWith('curl ')) {
+        onPaste(text);
       }
     });
 
@@ -187,11 +199,8 @@ export const OneLineEditor = forwardRef<OneLineEditorHandle, OneLineEditorProps>
     return () => codeMirror.current?.off('changes', fn);
   }, [onChange]);
 
-  useEffect(() => {
-    const handlePaste = (_: CodeMirror.Editor, e: ClipboardEvent) => onPaste?.(e);
-    codeMirror.current?.on('paste', handlePaste);
-    return () => codeMirror.current?.on('paste', handlePaste);
-  }, [onPaste]);
+  useEffect(() => window.main.on('context-menu-command', (_, { key, tag }) =>
+    id === key && codeMirror.current?.replaceSelection(tag)), [id]);
 
   useImperativeHandle(ref, () => ({
     selectAll: () => codeMirror.current?.setSelection({ line: 0, ch: 0 }, { line: codeMirror.current.lineCount(), ch: 0 }),
@@ -211,6 +220,13 @@ export const OneLineEditor = forwardRef<OneLineEditorHandle, OneLineEditorProps>
       })}
       data-editor-type={type || 'text'}
       data-testid="OneLineEditor"
+      onContextMenu={event => {
+        if (readOnly) {
+          return;
+        }
+        event.preventDefault();
+        window.main.showContextMenu({ key: id });
+      }}
     >
       <div className="editor__container input editor--single-line">
         <textarea

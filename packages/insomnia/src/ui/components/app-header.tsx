@@ -1,15 +1,12 @@
 import classNames from 'classnames';
 import React, { FC, Fragment, ReactNode } from 'react';
-import { useSelector } from 'react-redux';
 import styled from 'styled-components';
 
-import coreLogo from '../images/insomnia-logo.svg';
-import { selectIsLoggedIn } from '../redux/selectors';
+import * as session from '../../account/session';
 import { GitHubStarsButton } from './github-stars-button';
-
+import { InsomniaAILogo } from './insomnia-icon';
 const LogoWrapper = styled.div({
   display: 'flex',
-  width: '50px',
   justifyContent: 'center',
 });
 
@@ -76,16 +73,14 @@ export const AppHeader: FC<AppHeaderProps> = ({
   gridCenter,
   gridRight,
 }) => {
-  const isLoggedIn = useSelector(selectIsLoggedIn);
-
   return (
     <Header
       gridLeft={(
         <Fragment>
           <LogoWrapper>
-            <img style={{ zIndex: 1 }} src={coreLogo} alt="Insomnia" width="28" height="28" />
+            <InsomniaAILogo />
           </LogoWrapper>
-          {!isLoggedIn ? <GitHubStarsButton /> : null}
+          {!session.isLoggedIn() ? <GitHubStarsButton /> : null}
         </Fragment>
       )}
       gridCenter={gridCenter}

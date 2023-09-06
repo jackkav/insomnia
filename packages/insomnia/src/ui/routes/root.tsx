@@ -1,116 +1,138 @@
-import { IpcRendererEvent } from 'electron';
-import React, { useEffect, useState } from 'react';
+import '../css/styles.css';
+
+import type { IpcRendererEvent } from 'electron';
+import React, { Fragment, useEffect, useState } from 'react';
+import {
+  Breadcrumbs,
+  Button,
+  Item,
+  Link,
+  Menu,
+  MenuTrigger,
+  Popover,
+  Tooltip,
+  TooltipTrigger,
+} from 'react-aria-components';
 import {
   LoaderFunction,
+  NavLink,
   Outlet,
+  useLoaderData,
+  useLocation,
+  useNavigate,
   useParams,
-  useRevalidator,
   useRouteLoaderData,
 } from 'react-router-dom';
-import styled from 'styled-components';
 
-import { isLoggedIn, onLoginLogout } from '../../account/session';
+import {
+  getFirstName,
+  getLastName,
+  isLoggedIn,
+  logout,
+  onLoginLogout,
+} from '../../account/session';
 import { isDevelopment } from '../../common/constants';
-import { database } from '../../common/database';
 import * as models from '../../models';
-import { defaultOrganization, Organization } from '../../models/organization';
-import { isRemoteProject } from '../../models/project';
+import { isDefaultOrganization } from '../../models/organization';
+import { Settings } from '../../models/settings';
+import { isDesign } from '../../models/workspace';
 import { reloadPlugins } from '../../plugins';
 import { createPlugin } from '../../plugins/create';
 import { setTheme } from '../../plugins/misc';
 import { exchangeCodeForToken } from '../../sync/git/github-oauth-provider';
 import { exchangeCodeForGitLabToken } from '../../sync/git/gitlab-oauth-provider';
-import { initializeProjectFromTeam } from '../../sync/vcs/initialize-model-from';
-import { getVCS } from '../../sync/vcs/vcs';
 import { submitAuthCode } from '../auth-session-provider';
-import { AccountToolbar } from '../components/account-toolbar';
-import { AppHeader } from '../components/app-header';
-import { ErrorBoundary } from '../components/error-boundary';
+import { WorkspaceDropdown } from '../components/dropdowns/workspace-dropdown';
+import { GitHubStarsButton } from '../components/github-stars-button';
+import { Hotkey } from '../components/hotkey';
+import { Icon } from '../components/icon';
+import { InsomniaAILogo } from '../components/insomnia-icon';
 import { showError, showModal } from '../components/modals';
 import { AlertModal } from '../components/modals/alert-modal';
 import { AskModal } from '../components/modals/ask-modal';
 import { ImportModal } from '../components/modals/import-modal';
-import { LoginModal } from '../components/modals/login-modal';
+import { LoginModal, showLoginModal } from '../components/modals/login-modal';
 import {
   SettingsModal,
+  showSettingsModal,
   TAB_INDEX_PLUGINS,
   TAB_INDEX_THEMES,
 } from '../components/modals/settings-modal';
-import { OrganizationsNav } from '../components/organizations-navbar';
-import { StatusBar } from '../components/statusbar';
 import { Toast } from '../components/toast';
-import { WorkspaceHeader } from '../components/workspace-header';
 import { AppHooks } from '../containers/app-hooks';
-import withDragDropContext from '../context/app/drag-drop-context';
+import { AIProvider } from '../context/app/ai-context';
+import { WorkspaceProvider } from '../context/app/workspace-context';
 import { NunjucksEnabledProvider } from '../context/nunjucks/nunjucks-enabled-context';
+import { useSettingsPatcher } from '../hooks/use-request';
 import Modals from './modals';
+import { useOrganizationLoaderData } from './organization';
 import { WorkspaceLoaderData } from './workspace';
 
 export interface RootLoaderData {
-  organizations: Organization[];
+  settings: Settings;
 }
 
 export const loader: LoaderFunction = async (): Promise<RootLoaderData> => {
-  // Load all projects
-  try {
-    const vcs = getVCS();
-    if (vcs && isLoggedIn()) {
-      const teams = await vcs.teams();
-      const projects = await Promise.all(teams.map(initializeProjectFromTeam));
-      await database.batchModifyDocs({ upsert: projects });
-    }
-  } catch {
-    console.log('Failed to load projects');
-  }
-  const allProjects = await models.project.all();
-
-  const remoteOrgs = allProjects
-    .filter(isRemoteProject)
-    .map(({ _id, name }) => ({
-      _id,
-      name,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
   return {
-    organizations: [defaultOrganization, ...remoteOrgs],
+    settings: await models.settings.getOrCreate(),
   };
 };
 
-const Layout = styled.div({
-  position: 'relative',
-  height: '100%',
-  width: '100%',
-  display: 'grid',
-  backgroundColor: 'var(--color-bg)',
-  gridTemplate: `
-    'Header Header' auto
-    'Navbar Content' 1fr
-    'Statusbar Statusbar' 30px [row-end]
-    / 50px 1fr;
-  `,
-});
+const getNameInitials = (name: string) => {
+  // Split on whitespace and take first letter of each word
+  const words = name.toUpperCase().split(' ');
+  const firstWord = words[0];
+  const lastWord = words[words.length - 1];
+
+  // If there is only one word, just take the first letter
+  if (words.length === 1) {
+    return firstWord.charAt(0);
+  }
+
+  // If the first word is an emoji or an icon then just use that
+  const iconMatch = firstWord.match(/\p{Extended_Pictographic}/u);
+  if (iconMatch) {
+    return iconMatch[0];
+  }
+
+  return `${firstWord.charAt(0)}${lastWord ? lastWord.charAt(0) : ''}`;
+};
 
 const Root = () => {
-  const { revalidate } = useRevalidator();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { settings } = useLoaderData() as RootLoaderData;
+  const { organizations } = useOrganizationLoaderData();
   const workspaceData = useRouteLoaderData(
     ':workspaceId'
   ) as WorkspaceLoaderData | null;
   const [importUri, setImportUri] = useState('');
+  const patchSettings = useSettingsPatcher();
 
   useEffect(() => {
     onLoginLogout(() => {
-      revalidate();
+      // Update the hash of the current route to force revalidation of data
+      navigate({
+        pathname: location.pathname,
+        hash: 'revalidate=true',
+      });
     });
-  }, [revalidate]);
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     return window.main.on(
       'shell:open',
       async (_: IpcRendererEvent, url: string) => {
         // Get the url without params
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(url);
+        } catch (err) {
+          console.log('Invalid args, expected insomnia://x/y/z', url);
+          return;
+        }
         let urlWithoutParams = url.substring(0, url.indexOf('?')) || url;
-        const params = Object.fromEntries(new URL(url).searchParams);
+        const params = Object.fromEntries(parsedUrl.searchParams);
         // Change protocol for dev redirects to match switch case
         if (isDevelopment()) {
           urlWithoutParams = urlWithoutParams.replace(
@@ -188,10 +210,7 @@ const Root = () => {
                     '0.0.1',
                     mainJsContent
                   );
-                  const settings = await models.settings.getOrCreate();
-                  await models.settings.update(settings, {
-                    theme: parsedTheme.name,
-                  });
+                  patchSettings({ theme: parsedTheme.name });
                   await reloadPlugins();
                   await setTheme(parsedTheme.name);
                   showModal(SettingsModal, { tab: TAB_INDEX_THEMES });
@@ -239,7 +258,7 @@ const Root = () => {
         }
       }
     );
-  }, []);
+  }, [patchSettings]);
 
   const { organizationId, projectId, workspaceId } = useParams() as {
     organizationId: string;
@@ -247,40 +266,217 @@ const Root = () => {
     workspaceId?: string;
   };
 
-  return (
-    <NunjucksEnabledProvider>
-      <AppHooks />
-      <div className="app">
-        <ErrorBoundary showAlert>
-          <Modals />
-          {importUri && (
-            <ImportModal
-              onHide={() => setImportUri('')}
-              organizationId={organizationId}
-              defaultProjectId={projectId || ''}
-              defaultWorkspaceId={workspaceId}
-              from={{ type: 'uri', defaultValue: importUri }}
-            />
-          )}
-          <Layout>
-            <OrganizationsNav />
-            <AppHeader
-              gridCenter={
-                workspaceData ? <WorkspaceHeader {...workspaceData} /> : null
-              }
-              gridRight={<AccountToolbar />}
-            />
-            <Outlet />
-            <StatusBar />
-          </Layout>
-        </ErrorBoundary>
+  const crumbs = workspaceData
+    ? [
+      {
+        id: workspaceData.activeProject._id,
+        label: workspaceData.activeProject.name,
+        node: (
+          <Link data-testid="project">
+            <NavLink
+              to={`/organization/${organizationId}/project/${workspaceData.activeProject._id}`}
+            >
+              {workspaceData.activeProject.name}
+            </NavLink>
+          </Link>
+        ),
+      },
+      {
+        id: workspaceData.activeWorkspace._id,
+        label: workspaceData.activeWorkspace.name,
+        node: <WorkspaceDropdown />,
+      },
+    ]
+    : [];
 
-        <ErrorBoundary showAlert>
-          <Toast />
-        </ErrorBoundary>
-      </div>
-    </NunjucksEnabledProvider>
+  return (
+    <AIProvider>
+      <WorkspaceProvider>
+        <NunjucksEnabledProvider>
+          <AppHooks />
+          <div className="app">
+            <Modals />
+            {/* triggered by insomnia://app/import */}
+            {importUri && (
+              <ImportModal
+                onHide={() => setImportUri('')}
+                projectName="Insomnia"
+                organizationId={organizationId}
+                from={{ type: 'uri', defaultValue: importUri }}
+              />
+            )}
+            <div className="w-full h-full divide-x divide-solid divide-y divide-[--hl-md] grid-template-app-layout grid relative bg-[--color-bg]">
+              <header className="[grid-area:Header] grid grid-cols-3 items-center">
+                <div className="flex items-center">
+                  <div className="flex w-[50px] py-2">
+                    <InsomniaAILogo />
+                  </div>
+                  {!isLoggedIn() ? <GitHubStarsButton /> : null}
+                </div>
+                <div className="flex gap-2 flex-nowrap items-center justify-center">
+                  {workspaceData && (
+                    <Fragment>
+                      <Breadcrumbs items={crumbs}>
+                        {item => (
+                          <Item key={item.id} id={item.id}>
+                            {item.node}
+                          </Item>
+                        )}
+                      </Breadcrumbs>
+                      {isDesign(workspaceData?.activeWorkspace) && (
+                        <nav className="flex rounded-full justify-between content-evenly font-semibold bg-[--hl-xs] p-[--padding-xxs]">
+                          {['spec', 'debug', 'test'].map(item => (
+                            <NavLink
+                              key={item}
+                              to={`/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/${item}`}
+                              className={({ isActive }) =>
+                                `${isActive
+                                  ? 'text-[--color-font] bg-[--color-bg]'
+                                  : ''
+                                } no-underline transition-colors text-center outline-none min-w-[4rem] uppercase text-[--color-font] text-xs px-[--padding-xs] py-[--padding-xxs] rounded-full`
+                              }
+                            >
+                              {item}
+                            </NavLink>
+                          ))}
+                        </nav>
+                      )}
+                    </Fragment>
+                  )}
+                </div>
+                <div className="flex gap-[--padding-sm] items-center justify-end p-2">
+                  {isLoggedIn() ? (
+                    <MenuTrigger>
+                      <Button className="px-4 py-1 flex items-center justify-center gap-2 aria-pressed:bg-[--hl-sm] rounded-sm text-[--color-font] hover:bg-[--hl-xs] focus:ring-inset ring-1 ring-transparent focus:ring-[--hl-md] transition-all text-sm">
+                        <Icon icon="user" />{' '}
+                        {`${getFirstName()} ${getLastName()}`}
+                      </Button>
+                      <Popover className="min-w-max">
+                        <Menu
+                          onAction={action => {
+                            if (action === 'logout') {
+                              logout();
+                            }
+
+                            if (action === 'account-settings') {
+                              window.main.openInBrowser(
+                                'https://app.insomnia.rest/app/account/'
+                              );
+                            }
+                          }}
+                          className="border select-none text-sm min-w-max border-solid border-[--hl-sm] shadow-lg bg-[--color-bg] py-2 rounded-md overflow-y-auto max-h-[85vh] focus:outline-none"
+                        >
+                          <Item
+                            id="account-settings"
+                            className="flex gap-2 px-[--padding-md] aria-selected:font-bold items-center text-[--color-font] h-[--line-height-xs] w-full text-md whitespace-nowrap bg-transparent hover:bg-[--hl-sm] disabled:cursor-not-allowed focus:bg-[--hl-xs] focus:outline-none transition-colors"
+                            aria-label="Account settings"
+                          >
+                            <Icon icon="gear" />
+                            <span>Account Settings</span>
+                          </Item>
+                          <Item
+                            id="logout"
+                            className="flex gap-2 px-[--padding-md] aria-selected:font-bold items-center text-[--color-font] h-[--line-height-xs] w-full text-md whitespace-nowrap bg-transparent hover:bg-[--hl-sm] disabled:cursor-not-allowed focus:bg-[--hl-xs] focus:outline-none transition-colors"
+                            aria-label="logout"
+                          >
+                            <Icon icon="sign-out" />
+                            <span>Logout</span>
+                          </Item>
+                        </Menu>
+                      </Popover>
+                    </MenuTrigger>
+                  ) : (
+                    <Fragment>
+                      <Button
+                        onPress={showLoginModal}
+                        className="px-4 py-1 font-semibold border border-solid border-[--hl-md] flex items-center justify-center gap-2 aria-pressed:bg-[--hl-sm] rounded-sm text-[--color-font] hover:bg-[--hl-xs] focus:ring-inset ring-1 ring-transparent focus:ring-[--hl-md] transition-all text-sm"
+                      >
+                        Login
+                      </Button>
+                      <a
+                        className="px-4 py-1 flex items-center justify-center gap-2 aria-pressed:bg-[rgba(var(--color-surprise-rgb),0.8)] focus:bg-[rgba(var(--color-surprise-rgb),0.9)] bg-[--color-surprise] font-semibold rounded-sm text-[--color-font-surprise] focus:ring-inset ring-1 ring-transparent focus:ring-[--hl-md] transition-all text-sm"
+                        href="https://app.insomnia.rest/app/signup/"
+                      >
+                        Sign Up
+                      </a>
+                    </Fragment>
+                  )}
+                </div>
+              </header>
+              <div className="[grid-area:Navbar] overflow-hidden">
+                <nav className="flex flex-col items-center place-content-stretch gap-[--padding-md] w-full h-full overflow-y-auto py-[--padding-md]">
+                  {organizations.map(organization => (
+                    <TooltipTrigger key={organization._id}>
+                      <Link>
+                        <NavLink
+                          className={({ isActive }) =>
+                            `select-none text-[--color-font-surprise] flex-shrink-0 hover:no-underline transition-all duration-150 bg-gradient-to-br box-border from-[#4000BF] to-[#154B62] p-[--padding-sm] font-bold outline-[3px] rounded-md w-[28px] h-[28px] flex items-center justify-center active:outline overflow-hidden outline-offset-[3px] outline ${isActive
+                              ? 'outline-[--color-font]'
+                              : 'outline-transparent focus:outline-[--hl-md] hover:outline-[--hl-md]'
+                            }`
+                          }
+                          to={`/organization/${organization._id}`}
+                        >
+                          {isDefaultOrganization(organization) ? (
+                            <Icon icon="home" />
+                          ) : (
+                            getNameInitials(organization.name)
+                          )}
+                        </NavLink>
+                      </Link>
+                      <Tooltip
+                        placement="right"
+                        offset={8}
+                        className="border select-none text-sm min-w-max border-solid border-[--hl-sm] shadow-lg bg-[--color-bg] text-[--color-font] px-4 py-2 rounded-md overflow-y-auto max-h-[85vh] focus:outline-none"
+                      >
+                        <span>{organization.name}</span>
+                      </Tooltip>
+                    </TooltipTrigger>
+                  ))}
+                </nav>
+              </div>
+              <Outlet />
+              <div className="relative [grid-area:Statusbar] flex items-center justify-between overflow-hidden">
+                <TooltipTrigger>
+                  <Button
+                    data-testid="settings-button"
+                    className="px-4 py-1 h-full flex items-center justify-center gap-2 aria-pressed:bg-[--hl-sm] text-[--color-font] text-xs hover:bg-[--hl-xs] focus:ring-inset ring-1 ring-transparent focus:ring-[--hl-md] transition-all"
+                    onPress={showSettingsModal}
+                  >
+                    <Icon icon="gear" /> Preferences
+                  </Button>
+                  <Tooltip
+                    placement="top"
+                    offset={8}
+                    className="border flex items-center gap-2 select-none text-sm min-w-max border-solid border-[--hl-sm] shadow-lg bg-[--color-bg] text-[--color-font] px-4 py-2 rounded-md overflow-y-auto max-h-[85vh] focus:outline-none"
+                  >
+                    Preferences
+                    <Hotkey
+                      keyBindings={
+                        settings.hotKeyRegistry.preferences_showGeneral
+                      }
+                    />
+                  </Tooltip>
+                </TooltipTrigger>
+                <Link>
+                  <a
+                    className="flex focus:outline-none focus:underline gap-1 items-center text-xs text-[--color-font] px-[--padding-md]"
+                    href="https://konghq.com/"
+                  >
+                    Made with
+                    <Icon className="text-[--color-surprise]" icon="heart" /> by
+                    Kong
+                  </a>
+                </Link>
+              </div>
+            </div>
+
+            <Toast />
+          </div>
+        </NunjucksEnabledProvider>
+      </WorkspaceProvider>
+    </AIProvider>
   );
 };
 
-export default withDragDropContext(Root);
+export default Root;

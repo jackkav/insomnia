@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.build.json",
   "include": [
-    "**/insomnia.config.json",
     ".eslintrc.js",
     "config",
     "electron-builder.config.js",
@@ -12,11 +11,12 @@
     "scripts",
     "send-request",
     "src",
+    "tailwind.config.js",
+    "postcss.config.js",
     "vite.config.ts",
     "vite-plugin-electron-node-require"
   ],
   "exclude": [
-    "**/@types/mocha",
     "bin",
     "build",
     "config",

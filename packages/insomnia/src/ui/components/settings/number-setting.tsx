@@ -1,10 +1,9 @@
 import React, { ChangeEventHandler, FC, InputHTMLAttributes, useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
-import { snapNumberToLimits } from '../../../common/misc';
 import { SettingsOfType } from '../../../common/settings';
-import * as models from '../../../models/index';
-import { selectSettings } from '../../redux/selectors';
+import { useSettingsPatcher } from '../../hooks/use-request';
+import { RootLoaderData } from '../../routes/root';
 import { HelpTooltip } from '../help-tooltip';
 
 interface Props {
@@ -15,7 +14,17 @@ interface Props {
   setting: SettingsOfType<number>;
   step?: InputHTMLAttributes<HTMLInputElement>['step'];
 }
-
+export function snapNumberToLimits(value: number, min?: number, max?: number) {
+  const moreThanMax = max && !Number.isNaN(max) && value > max;
+  if (moreThanMax) {
+    return max;
+  }
+  const lessThanMin = min && !Number.isNaN(min) && value < min;
+  if (lessThanMin) {
+    return min;
+  }
+  return value;
+}
 export const NumberSetting: FC<Props> = ({
   help,
   label,
@@ -24,11 +33,14 @@ export const NumberSetting: FC<Props> = ({
   setting,
   step = 1,
 }) => {
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
 
   if (!Object.prototype.hasOwnProperty.call(settings, setting)) {
     throw new Error(`Invalid setting name ${setting}`);
   }
+  const patchSettings = useSettingsPatcher();
 
   const handleOnChange = useCallback<ChangeEventHandler<HTMLInputElement>>(async ({ currentTarget: { value, min, max } }) => {
     const updatedValue = snapNumberToLimits(
@@ -36,8 +48,8 @@ export const NumberSetting: FC<Props> = ({
       parseInt(min, 10),
       parseInt(max, 10),
     );
-    await models.settings.patch({ [setting]: updatedValue });
-  }, [setting]);
+    patchSettings({ [setting]: updatedValue });
+  }, [patchSettings, setting]);
 
   let defaultValue: string | number = settings[setting];
   if (typeof defaultValue !== 'number') {

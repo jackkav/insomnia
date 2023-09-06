@@ -4,6 +4,7 @@ import electron from 'electron';
 import fs from 'fs';
 import { join as pathJoin, resolve as pathResolve } from 'path';
 
+import { version } from '../../../package.json';
 import { globalBeforeEach } from '../../__jest__/before-each';
 import {
   AUTH_AWS_IAM,
@@ -12,7 +13,6 @@ import {
   CONTENT_TYPE_FILE,
   CONTENT_TYPE_FORM_DATA,
   CONTENT_TYPE_FORM_URLENCODED,
-  getAppVersion,
 } from '../../common/constants';
 import { filterHeaders } from '../../common/misc';
 import { getRenderedRequestAndContext } from '../../common/render';
@@ -138,7 +138,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         PROXY: '',
         TIMEOUT_MS: 30000,
         URL: 'http://localhost/?foo%20bar=hello%26world',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -208,7 +208,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         PROXY: '',
         TIMEOUT_MS: 30000,
         URL: 'http://localhost/',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -309,7 +309,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         PROXY: '',
         TIMEOUT_MS: 30000,
         URL: 'http://localhost/?foo%20bar=hello%26world',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -373,7 +373,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         TIMEOUT_MS: 30000,
         UPLOAD: 1,
         URL: 'http://localhost/',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -466,7 +466,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         TIMEOUT_MS: 30000,
         URL: 'http://localhost/',
         UPLOAD: 1,
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -507,7 +507,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         TIMEOUT_MS: 30000,
         URL: 'http://my/path',
         UNIX_SOCKET_PATH: '/my/socket',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -547,7 +547,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         PROXY: '',
         TIMEOUT_MS: 30000,
         URL: 'http://localhost:3000/foo/bar',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -587,7 +587,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         PROXY: '',
         TIMEOUT_MS: 30000,
         URL: 'http://unix:3000/my/path',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -629,7 +629,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         TIMEOUT_MS: 30000,
         NETRC: CurlNetrc.Required,
         URL: '',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });
@@ -741,7 +741,7 @@ describe('sendCurlAndWriteTimeline()', () => {
         SSL_VERIFYPEER: 0, // should disable SSL
         TIMEOUT_MS: 30000,
         URL: 'http://localhost/?foo%20bar=hello%26world',
-        USERAGENT: `insomnia/${getAppVersion()}`,
+        USERAGENT: `insomnia/${version}`,
         VERBOSE: true,
       },
     });

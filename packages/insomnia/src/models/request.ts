@@ -115,6 +115,14 @@ export const isRequest = (model: Pick<BaseModel, 'type'>): model is Request => (
   model.type === type
 );
 
+export const isRequestId = (id: string | null) => (
+  id?.startsWith(`${prefix}_`)
+);
+
+export const isEventStreamRequest = (model: Pick<BaseModel, 'type'>) => (
+  isRequest(model) && model.headers?.find(h => h.name === 'Accept')?.value === 'text/event-stream'
+);
+
 export function init(): BaseRequest {
   return {
     url: '',
@@ -224,10 +232,15 @@ export function newAuth(type: string, oldAuth: RequestAuthentication = {}): Requ
 }
 
 export function migrate(doc: Request): Request {
-  doc = migrateBody(doc);
-  doc = migrateWeirdUrls(doc);
-  doc = migrateAuthType(doc);
-  return doc;
+  try {
+    doc = migrateBody(doc);
+    doc = migrateWeirdUrls(doc);
+    doc = migrateAuthType(doc);
+    return doc;
+  } catch (e) {
+    console.log('[db] Error during request migration', e);
+    throw e;
+  }
 }
 
 export function create(patch: Partial<Request> = {}) {

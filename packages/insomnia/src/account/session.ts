@@ -1,7 +1,6 @@
 import * as srp from 'srp-js';
 
 import * as crypt from './crypt';
-import * as fetch from './fetch';
 
 type LoginCallback = (isLoggedIn: boolean) => void;
 
@@ -37,22 +36,10 @@ export interface SessionData {
   publicKey: JsonWebKey;
   encPrivateKey: crypt.AESMessage;
 }
-
-const loginCallbacks: LoginCallback[] = [];
-
-function _callCallbacks() {
-  const loggedIn = isLoggedIn();
-  console.log('[session] Sync state changed loggedIn=' + loggedIn);
-
-  for (const cb of loginCallbacks) {
-    if (typeof cb === 'function') {
-      cb(loggedIn);
-    }
-  }
-}
-
 export function onLoginLogout(loginCallback: LoginCallback) {
-  loginCallbacks.push(loginCallback);
+  window.main.on('loggedIn', () => {
+    loginCallback(isLoggedIn());
+  });
 }
 
 /** Creates a session from a sessionId and derived symmetric key. */
@@ -80,7 +67,7 @@ export async function absorbKey(sessionId: string, key: string) {
     JSON.parse(encPrivateKey),
   );
 
-  _callCallbacks();
+  window.main.loginStateChange();
 }
 
 export async function changePasswordWithToken(rawNewPassphrase: string, confirmationCode: string) {
@@ -111,21 +98,26 @@ export async function changePasswordWithToken(rawNewPassphrase: string, confirma
   const symmetricKey = JSON.stringify(_getSymmetricKey());
   const newEncSymmetricKeyJSON = crypt.encryptAES(newSecret, symmetricKey);
   const newEncSymmetricKey = JSON.stringify(newEncSymmetricKeyJSON);
-  return fetch.post(
-    '/auth/change-password',
-    {
+  return window.main.insomniaFetch({
+    method: 'POST',
+    path: '/auth/change-password',
+    data: {
       code: confirmationCode,
       newEmail: newEmail,
       encSymmetricKey: encSymmetricKey,
       newVerifier,
       newEncSymmetricKey,
     },
-    getCurrentSessionId(),
-  );
+    sessionId: getCurrentSessionId(),
+  });
 }
 
 export function sendPasswordChangeCode() {
-  return fetch.post('/auth/send-password-code', null, getCurrentSessionId());
+  return window.main.insomniaFetch({
+    method: 'POST',
+    path: '/auth/send-password-code',
+    sessionId: getCurrentSessionId(),
+  });
 }
 
 export function getPublicKey() {
@@ -185,7 +177,11 @@ export function isLoggedIn() {
 /** Log out and delete session data */
 export async function logout() {
   try {
-    await fetch.post('/auth/logout', null, getCurrentSessionId());
+    await window.main.insomniaFetch({
+      method: 'POST',
+      path: '/auth/logout',
+      sessionId: getCurrentSessionId(),
+    });
   } catch (error) {
     // Not a huge deal if this fails, but we don't want it to prevent the
     // user from signing out.
@@ -193,13 +189,12 @@ export async function logout() {
   }
 
   _unsetSessionData();
-
-  _callCallbacks();
+  window.main.loginStateChange();
 }
 
 /** Set data for the new session and store it encrypted with the sessionId */
 export function setSessionData(
-  sessionId: string,
+  id: string,
   accountId: string,
   firstName: string,
   lastName: string,
@@ -209,22 +204,27 @@ export function setSessionData(
   encPrivateKey: crypt.AESMessage,
 ) {
   const sessionData: SessionData = {
-    id: sessionId,
-    accountId: accountId,
-    symmetricKey: symmetricKey,
-    publicKey: publicKey,
-    encPrivateKey: encPrivateKey,
-    email: email,
-    firstName: firstName,
-    lastName: lastName,
+    id,
+    accountId,
+    symmetricKey,
+    publicKey,
+    encPrivateKey,
+    email,
+    firstName,
+    lastName,
   };
   const dataStr = JSON.stringify(sessionData);
-  window.localStorage.setItem(_getSessionKey(sessionId), dataStr);
+  window.localStorage.setItem(_getSessionKey(id), dataStr);
   // NOTE: We're setting this last because the stuff above might fail
-  window.localStorage.setItem('currentSessionId', sessionId);
+  window.localStorage.setItem('currentSessionId', id);
+  return sessionData;
 }
 export async function listTeams() {
-  return fetch.get('/api/teams', getCurrentSessionId());
+  return window.main.insomniaFetch({
+    method: 'GET',
+    path: '/api/teams',
+    sessionId: getCurrentSessionId(),
+  });
 }
 
 // ~~~~~~~~~~~~~~~~ //
@@ -234,18 +234,25 @@ function _getSymmetricKey() {
   return _getSessionData()?.symmetricKey;
 }
 
-function _whoami(sessionId: string | null = null): Promise<WhoamiResponse> {
-  return fetch.getJson<WhoamiResponse>('/auth/whoami', sessionId || getCurrentSessionId());
+async function _whoami(sessionId: string | null = null): Promise<WhoamiResponse> {
+  const response = await window.main.insomniaFetch<WhoamiResponse>({
+    method: 'GET',
+    path: '/auth/whoami',
+    sessionId: sessionId || getCurrentSessionId(),
+  });
+  if (typeof response === 'string') {
+    throw new Error('Unexpected plaintext response');
+  }
+  return response;
 }
 
 function _getAuthSalts(email: string) {
-  return fetch.post(
-    '/auth/login-s',
-    {
-      email,
-    },
-    getCurrentSessionId(),
-  );
+  return window.main.insomniaFetch({
+    method: 'POST',
+    path: '/auth/login-s',
+    data: { email },
+    sessionId: getCurrentSessionId(),
+  });
 }
 
 const _getSessionData = (): Partial<SessionData> | null => {

@@ -1,8 +1,8 @@
 import { type Environment } from 'nunjucks';
 import nunjucks from 'nunjucks/browser/nunjucks';
 
-import type { TemplateTag } from '../plugins/index';
 import * as plugins from '../plugins/index';
+import { localTemplateTags } from '../ui/components/templating/local-template-tags';
 import BaseExtension from './base-extension';
 import type { NunjucksParsedTag } from './utils';
 
@@ -71,6 +71,7 @@ export function render(
     nj?.renderString(text, templatingContext, (err: Error | null, result: any) => {
       clearTimeout(id);
       if (err) {
+        console.log('Error rendering template', err);
         const sanitizedMsg = err.message
           .replace(/\(unknown path\)\s/, '')
           .replace(/\[Line \d+, Column \d*]/, '')
@@ -176,18 +177,10 @@ async function getNunjucks(renderMode: string): Promise<NunjucksEnvironment> {
   // Create Env with Extensions //
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   const nunjucksEnvironment = nunjucks.configure(config) as NunjucksEnvironment;
-  let allTemplateTagPlugins: TemplateTag[];
 
-  try {
-    plugins.ignorePlugin('insomnia-plugin-kong-declarative-config');
-    plugins.ignorePlugin('insomnia-plugin-kong-kubernetes-config');
-    plugins.ignorePlugin('insomnia-plugin-kong-portal');
-    allTemplateTagPlugins = await plugins.getTemplateTags();
-  } finally {
-    plugins.clearIgnores();
-  }
+  const pluginTemplateTags = await plugins.getTemplateTags();
 
-  const allExtensions = allTemplateTagPlugins;
+  const allExtensions = [...pluginTemplateTags, ...localTemplateTags];
 
   for (const extension of allExtensions) {
     const { templateTag, plugin } = extension;

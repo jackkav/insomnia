@@ -1,14 +1,11 @@
-import React, { ChangeEventHandler, FC, ReactNode, useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import React, { FC, ReactNode } from 'react';
+import { useRouteLoaderData } from 'react-router-dom';
 import styled from 'styled-components';
 
 import { SettingsOfType } from '../../../common/settings';
-import { getControlledStatus } from '../../../models/helpers/settings';
-import * as models from '../../../models/index';
-import { selectSettings } from '../../redux/selectors';
+import { useSettingsPatcher } from '../../hooks/use-request';
+import { RootLoaderData } from '../../routes/root';
 import { HelpTooltip } from '../help-tooltip';
-import { ControlledSetting } from './controlled-setting';
-
 const Descriptions = styled.div({
   fontSize: 'var(--font-size-sm)',
   opacity: 'var(--opacity-subtle)',
@@ -25,26 +22,24 @@ export const BooleanSetting: FC<{
   help?: string;
   label: ReactNode;
   setting: SettingsOfType<boolean>;
+  disabled?: boolean;
 }> = ({
   descriptions,
   help,
   label,
   setting,
+  disabled = false,
 }) => {
-  const settings = useSelector(selectSettings);
-
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
   if (!settings.hasOwnProperty(setting)) {
     throw new Error(`Invalid boolean setting name ${setting}`);
   }
-
-  const { isControlled } = getControlledStatus(settings)(setting);
-
-  const onChange = useCallback<ChangeEventHandler<HTMLInputElement>>(async ({ currentTarget: { checked } }) => {
-    await models.settings.patch({ [setting]: checked });
-  }, [setting]);
+  const patchSettings = useSettingsPatcher();
 
   return (
-    <ControlledSetting setting={setting}>
+    <>
       <div className="form-control form-control--thin">
         <label className="inline-block">
           {label}
@@ -52,9 +47,9 @@ export const BooleanSetting: FC<{
           <input
             checked={Boolean(settings[setting])}
             name={setting}
-            onChange={onChange}
+            onChange={event => patchSettings({ [setting]: event.currentTarget.checked })}
             type="checkbox"
-            disabled={isControlled}
+            disabled={disabled}
           />
         </label>
       </div>
@@ -66,6 +61,6 @@ export const BooleanSetting: FC<{
           ))}
         </Descriptions>
       )}
-    </ControlledSetting>
+    </>
   );
 };

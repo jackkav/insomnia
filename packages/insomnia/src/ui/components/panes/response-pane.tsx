@@ -1,18 +1,16 @@
-import { clipboard } from 'electron';
 import fs from 'fs';
 import { extension as mimeExtension } from 'mime-types';
 import React, { FC, useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import { PREVIEW_MODE_SOURCE } from '../../../common/constants';
 import { getSetCookieHeaders } from '../../../common/misc';
 import * as models from '../../../models';
-import type { Request } from '../../../models/request';
-import type { Response } from '../../../models/response';
 import { cancelRequestById } from '../../../network/cancellation';
 import { jsonPrettify } from '../../../utils/prettify/json';
-import { updateRequestMetaByParentId } from '../../hooks/create-request';
-import { selectActiveResponse, selectResponseFilter, selectResponseFilterHistory, selectResponsePreviewMode, selectSettings } from '../../redux/selectors';
+import { useRequestMetaPatcher } from '../../hooks/use-request';
+import { RequestLoaderData } from '../../routes/request';
+import { RootLoaderData } from '../../routes/root';
 import { PanelContainer, TabItem, Tabs } from '../base/tabs';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
@@ -31,24 +29,25 @@ import { Pane, PaneHeader } from './pane';
 import { PlaceholderResponsePane } from './placeholder-response-pane';
 
 interface Props {
-  request?: Request | null;
-  runningRequests: Record<string, number>;
+  runningRequests: Record<string, boolean>;
 }
 export const ResponsePane: FC<Props> = ({
-  request,
   runningRequests,
 }) => {
-  const response = useSelector(selectActiveResponse) as Response | null;
-  const filterHistory = useSelector(selectResponseFilterHistory);
-  const filter = useSelector(selectResponseFilter);
-  const settings = useSelector(selectSettings);
-  const previewMode = useSelector(selectResponsePreviewMode);
+  const { activeRequest, activeRequestMeta, activeResponse } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
+  const filterHistory = activeRequestMeta.responseFilterHistory || [];
+  const filter = activeRequestMeta.responseFilter || '';
+  const patchRequestMeta = useRequestMetaPatcher();
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const previewMode = activeRequestMeta.previewMode || PREVIEW_MODE_SOURCE;
   const handleSetFilter = async (responseFilter: string) => {
-    if (!response) {
+    if (!activeResponse) {
       return;
     }
-    const requestId = response.parentId;
-    await updateRequestMetaByParentId(requestId, { responseFilter });
+    const requestId = activeResponse.parentId;
+    await patchRequestMeta(requestId, { responseFilter });
     const meta = await models.requestMeta.getByParentId(requestId);
     if (!meta) {
       return;
@@ -59,39 +58,39 @@ export const ResponsePane: FC<Props> = ({
       return;
     }
     responseFilterHistory.unshift(responseFilter);
-    updateRequestMetaByParentId(requestId, { responseFilterHistory });
+    patchRequestMeta(requestId, { responseFilterHistory });
   };
   const handleGetResponseBody = useCallback(() => {
-    if (!response) {
+    if (!activeResponse) {
       return null;
     }
-    return models.response.getBodyBuffer(response);
-  }, [response]);
+    return models.response.getBodyBuffer(activeResponse);
+  }, [activeResponse]);
   const handleCopyResponseToClipboard = useCallback(async () => {
     const bodyBuffer = handleGetResponseBody();
     if (bodyBuffer) {
-      clipboard.writeText(bodyBuffer.toString('utf8'));
+      window.clipboard.writeText(bodyBuffer.toString('utf8'));
     }
   }, [handleGetResponseBody]);
   const handleDownloadResponseBody = useCallback(async (prettify: boolean) => {
-    if (!response || !request) {
+    if (!activeResponse || !activeRequest) {
       console.warn('Nothing to download');
       return;
     }
 
-    const { contentType } = response;
+    const { contentType } = activeResponse;
     const extension = mimeExtension(contentType) || 'unknown';
     const { canceled, filePath: outputPath } = await window.dialog.showSaveDialog({
       title: 'Save Response Body',
       buttonLabel: 'Save',
-      defaultPath: `${request.name.replace(/ +/g, '_')}-${Date.now()}.${extension}`,
+      defaultPath: `${activeRequest.name.replace(/ +/g, '_')}-${Date.now()}.${extension}`,
     });
 
     if (canceled) {
       return;
     }
 
-    const readStream = models.response.getBodyStream(response);
+    const readStream = models.response.getBodyStream(activeResponse);
     const dataBuffers: any[] = [];
 
     if (readStream && outputPath && typeof readStream !== 'string') {
@@ -118,37 +117,35 @@ export const ResponsePane: FC<Props> = ({
         to.end();
       });
     }
-  }, [request, response]);
+  }, [activeRequest, activeResponse]);
 
-  if (!request) {
+  if (!activeRequest) {
     return <BlankPane type="response" />;
   }
 
   // If there is no previous response, show placeholder for loading indicator
-  if (!response) {
+  if (!activeResponse) {
     return (
       <PlaceholderResponsePane>
-        {runningRequests[request._id] && <ResponseTimer
-          handleCancel={() => cancelRequestById(request._id)}
+        {runningRequests[activeRequest._id] && <ResponseTimer
+          handleCancel={() => cancelRequestById(activeRequest._id)}
         />}
       </PlaceholderResponsePane>
     );
   }
-  const timeline = models.response.getTimeline(response);
-  const cookieHeaders = getSetCookieHeaders(response.headers);
+  const timeline = models.response.getTimeline(activeResponse);
+  const cookieHeaders = getSetCookieHeaders(activeResponse.headers);
   return (
     <Pane type="response">
-      {!response ? null : (
+      {!activeResponse ? null : (
         <PaneHeader className="row-spaced">
           <div aria-atomic="true" aria-live="polite" className="no-wrap scrollable scrollable--no-bars pad-left">
-            <StatusTag statusCode={response.statusCode} statusMessage={response.statusMessage} />
-            <TimeTag milliseconds={response.elapsedTime} />
-            <SizeTag bytesRead={response.bytesRead} bytesContent={response.bytesContent} />
+            <StatusTag statusCode={activeResponse.statusCode} statusMessage={activeResponse.statusMessage} />
+            <TimeTag milliseconds={activeResponse.elapsedTime} />
+            <SizeTag bytesRead={activeResponse.bytesRead} bytesContent={activeResponse.bytesContent} />
           </div>
           <ResponseHistoryDropdown
-            activeResponse={response}
-            requestId={request._id}
-            className="tall pane__header__right"
+            activeResponse={activeResponse}
           />
         </PaneHeader>
       )}
@@ -163,21 +160,21 @@ export const ResponsePane: FC<Props> = ({
           }
         >
           <ResponseViewer
-            key={response._id}
-            bytes={Math.max(response.bytesContent, response.bytesRead)}
-            contentType={response.contentType || ''}
+            key={activeResponse._id}
+            bytes={Math.max(activeResponse.bytesContent, activeResponse.bytesRead)}
+            contentType={activeResponse.contentType || ''}
             disableHtmlPreviewJs={settings.disableHtmlPreviewJs}
             disablePreviewLinks={settings.disableResponsePreviewLinks}
             download={handleDownloadResponseBody}
             editorFontSize={settings.editorFontSize}
-            error={response.error}
+            error={activeResponse.error}
             filter={filter}
             filterHistory={filterHistory}
             getBody={handleGetResponseBody}
-            previewMode={response.error ? PREVIEW_MODE_SOURCE : previewMode}
-            responseId={response._id}
-            updateFilter={response.error ? undefined : handleSetFilter}
-            url={response.url}
+            previewMode={activeResponse.error ? PREVIEW_MODE_SOURCE : previewMode}
+            responseId={activeResponse._id}
+            updateFilter={activeResponse.error ? undefined : handleSetFilter}
+            url={activeResponse.url}
           />
         </TabItem>
         <TabItem
@@ -185,15 +182,15 @@ export const ResponsePane: FC<Props> = ({
           title={
             <>
               Headers
-              {response.headers.length > 0 && (
-                <span className="bubble">{response.headers.length}</span>
+              {activeResponse.headers.length > 0 && (
+                <span className="bubble">{activeResponse.headers.length}</span>
               )}
             </>
           }
         >
           <PanelContainer className="pad">
-            <ErrorBoundary key={response._id} errorClassName="font-error pad text-center">
-              <ResponseHeadersViewer headers={response.headers} />
+            <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
+              <ResponseHeadersViewer headers={activeResponse.headers} />
             </ErrorBoundary>
           </PanelContainer>
         </TabItem>
@@ -209,27 +206,27 @@ export const ResponsePane: FC<Props> = ({
           }
         >
           <PanelContainer className="pad">
-            <ErrorBoundary key={response._id} errorClassName="font-error pad text-center">
+            <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
               <ResponseCookiesViewer
-                cookiesSent={response.settingSendCookies}
-                cookiesStored={response.settingStoreCookies}
+                cookiesSent={activeResponse.settingSendCookies}
+                cookiesStored={activeResponse.settingStoreCookies}
                 headers={cookieHeaders}
               />
             </ErrorBoundary>
           </PanelContainer>
         </TabItem>
         <TabItem key="timeline" title="Timeline">
-          <ErrorBoundary key={response._id} errorClassName="font-error pad text-center">
+          <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
             <ResponseTimelineViewer
-              key={response._id}
+              key={activeResponse._id}
               timeline={timeline}
             />
           </ErrorBoundary>
         </TabItem>
       </Tabs>
       <ErrorBoundary errorClassName="font-error pad text-center">
-        {runningRequests[request._id] && <ResponseTimer
-          handleCancel={() => cancelRequestById(request._id)}
+        {runningRequests[activeRequest._id] && <ResponseTimer
+          handleCancel={() => cancelRequestById(activeRequest._id)}
         />}
       </ErrorBoundary>
     </Pane>

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 import { gRPCBridgeAPI } from './main/ipc/grpc';
+import { CurlBridgeAPI } from './main/network/curl';
 import type { WebSocketBridgeAPI } from './main/network/websocket';
 
 const webSocket: WebSocketBridgeAPI = {
@@ -15,6 +16,18 @@ const webSocket: WebSocketBridgeAPI = {
     send: options => ipcRenderer.invoke('webSocket.event.send', options),
   },
 };
+const curl: CurlBridgeAPI = {
+  open: options => ipcRenderer.invoke('curl.open', options),
+  close: options => ipcRenderer.send('curl.close', options),
+  closeAll: () => ipcRenderer.send('curl.closeAll'),
+  readyState: {
+    getCurrent: options => ipcRenderer.invoke('curl.readyState', options),
+  },
+  event: {
+    findMany: options => ipcRenderer.invoke('curl.event.findMany', options),
+  },
+};
+
 const grpc: gRPCBridgeAPI = {
   start: options => ipcRenderer.send('grpc.start', options),
   sendMessage: options => ipcRenderer.send('grpc.sendMessage', options),
@@ -25,8 +38,13 @@ const grpc: gRPCBridgeAPI = {
   loadMethodsFromReflection: options => ipcRenderer.invoke('grpc.loadMethodsFromReflection', options),
 };
 const main: Window['main'] = {
+  loginStateChange: () => ipcRenderer.send('loginStateChange'),
   restart: () => ipcRenderer.send('restart'),
-  exportAllWorkspaces: () => ipcRenderer.invoke('exportAllWorkspaces'),
+  openInBrowser: options => ipcRenderer.send('openInBrowser', options),
+  halfSecondAfterAppStart: () => ipcRenderer.send('halfSecondAfterAppStart'),
+  manualUpdateCheck: () => ipcRenderer.send('manualUpdateCheck'),
+  backup: () => ipcRenderer.invoke('backup'),
+  restoreBackup: options => ipcRenderer.invoke('restoreBackup', options),
   authorizeUserInWindow: options => ipcRenderer.invoke('authorizeUserInWindow', options),
   spectralRun: options => ipcRenderer.invoke('spectralRun', options),
   setMenuBarVisibility: options => ipcRenderer.send('setMenuBarVisibility', options),
@@ -40,6 +58,12 @@ const main: Window['main'] = {
   },
   webSocket,
   grpc,
+  curl,
+  trackSegmentEvent: options => ipcRenderer.send('trackSegmentEvent', options),
+  trackPageView: options => ipcRenderer.send('trackPageView', options),
+  axiosRequest: options => ipcRenderer.invoke('axiosRequest', options),
+  insomniaFetch: options => ipcRenderer.invoke('insomniaFetch', options),
+  showContextMenu: options => ipcRenderer.send('show-context-menu', options),
 };
 const dialog: Window['dialog'] = {
   showOpenDialog: options => ipcRenderer.invoke('showOpenDialog', options),
@@ -52,15 +76,22 @@ const app: Window['app'] = {
 const shell: Window['shell'] = {
   showItemInFolder: options => ipcRenderer.send('showItemInFolder', options),
 };
+const clipboard: Window['clipboard'] = {
+  readText: () => ipcRenderer.sendSync('readText'),
+  writeText: options => ipcRenderer.send('writeText', options),
+  clear: () => ipcRenderer.send('clear'),
+};
 
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('main', main);
   contextBridge.exposeInMainWorld('dialog', dialog);
   contextBridge.exposeInMainWorld('app', app);
   contextBridge.exposeInMainWorld('shell', shell);
+  contextBridge.exposeInMainWorld('clipboard', clipboard);
 } else {
   window.main = main;
   window.dialog = dialog;
   window.app = app;
   window.shell = shell;
+  window.clipboard = clipboard;
 }

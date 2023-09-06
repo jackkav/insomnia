@@ -8,7 +8,7 @@ import { ModifiedGraphQLJumpOptions } from 'codemirror-graphql/jump';
 import deepEqual from 'deep-equal';
 import { JSONPath } from 'jsonpath-plus';
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 import { useMount, useUnmount } from 'react-use';
 import vkBeautify from 'vkbeautify';
 
@@ -20,14 +20,13 @@ import { NunjucksParsedTag } from '../../../templating/utils';
 import { jsonPrettify } from '../../../utils/prettify/json';
 import { queryXPath } from '../../../utils/xpath/query';
 import { useGatedNunjucks } from '../../context/nunjucks/use-gated-nunjucks';
-import { selectSettings } from '../../redux/selectors';
+import { RootLoaderData } from '../../routes/root';
 import { Dropdown, DropdownButton, DropdownItem, ItemContent } from '../base/dropdown';
 import { createKeybindingsHandler, useDocBodyKeyboardShortcuts } from '../keydown-binder';
 import { FilterHelpModal } from '../modals/filter-help-modal';
 import { showModal } from '../modals/index';
 import { isKeyCombinationInRegistry } from '../settings/shortcuts';
 import { normalizeIrregularWhitespace } from './normalizeIrregularWhitespace';
-
 const TAB_SIZE = 4;
 const MAX_SIZE_FOR_LINTING = 1000000; // Around 1MB
 
@@ -82,7 +81,7 @@ export interface CodeEditorProps {
   hideGutters?: boolean;
   hideLineNumbers?: boolean;
   hintOptions?: ShowHintOptions;
-  id?: string;
+  id: string;
   infoOptions?: GraphQLInfoOptions;
   jumpOptions?: ModifiedGraphQLJumpOptions;
   lintOptions?: Record<string, any>;
@@ -95,6 +94,7 @@ export interface CodeEditorProps {
   onBlur?: () => void;
   onChange?: (value: string) => void;
   onClickLink?: CodeMirrorLinkClickCallback;
+  pinToBottom?: boolean;
   placeholder?: string;
   readOnly?: boolean;
   style?: Object;
@@ -159,6 +159,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
   onBlur,
   onChange,
   onClickLink,
+  pinToBottom,
   placeholder,
   readOnly,
   style,
@@ -169,7 +170,9 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const codeMirror = useRef<CodeMirror.EditorFromTextArea | null>(null);
   const [originalCode, setOriginalCode] = useState('');
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
   const indentSize = settings.editorIndentSize;
   const indentWithTabs = shouldIndentWithTabs({ mode, indentWithTabs: settings.editorIndentWithTabs });
   const indentChars = indentWithTabs ? '\t' : new Array((indentSize || TAB_SIZE) + 1).join(' ');
@@ -320,9 +323,22 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
         // Don't allow non-breaking spaces because they break the GraphQL syntax
         change.update?.(change.from, change.to, change.text.map(normalizeIrregularWhitespace));
       }
+      if (pinToBottom) {
+        const scrollInfo = doc.getScrollInfo();
+        const scrollPosition = scrollInfo.height - scrollInfo.clientHeight;
+        doc.scrollTo(0, scrollPosition);
+      }
     });
 
-    codeMirror.current.on('keydown', (_: CodeMirror.Editor, event: KeyboardEvent) => {
+    codeMirror.current.on('change', (doc: CodeMirror.Editor) => {
+      if (pinToBottom) {
+        const scrollInfo = doc.getScrollInfo();
+        const scrollPosition = scrollInfo.height - scrollInfo.clientHeight;
+        doc.scrollTo(0, scrollPosition);
+      }
+    });
+
+    codeMirror.current.on('keydown', (doc: CodeMirror.Editor, event: KeyboardEvent) => {
       const pressedKeyComb: KeyCombination = {
         ctrl: event.ctrlKey,
         alt: event.altKey,
@@ -347,19 +363,18 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
         event.codemirrorIgnore = true;
       } else {
         event.stopPropagation();
-      }
-    });
-    codeMirror.current.on('keyup', (doc: CodeMirror.Editor, event: KeyboardEvent) => {
-      // Enable graphql completion if we're in that mode
-      if (doc.getOption('mode') === 'graphql') {
-        // Only operate on one-letter keys. This will filter out
-        // any special keys (Backspace, Enter, etc)
-        const isModifier = event.metaKey || event.ctrlKey || event.altKey || event.key.length > 1;
-        // You don't want to re-trigger the hint dropdown if it's already open
-        // for other reasons, like forcing its display with Ctrl+Space
-        const isDropdownActive = codeMirror.current?.isHintDropdownActive();
-        if (!isModifier && !isDropdownActive) {
-          doc.execCommand('autocomplete');
+
+        // Enable graphql completion if we're in that mode
+        if (doc.getOption('mode') === 'graphql') {
+          // Only operate on one-letter keys. This will filter out
+          // any special keys (Backspace, Enter, etc)
+          const isModifier = event.metaKey || event.ctrlKey || event.altKey || event.key.length > 1;
+          // You don't want to re-trigger the hint dropdown if it's already open
+          // for other reasons, like forcing its display with Ctrl+Space
+          const isDropdownActive = codeMirror.current?.isHintDropdownActive();
+          if ((isAutoCompleteBinding || !isModifier) && !isDropdownActive) {
+            doc.execCommand('autocomplete');
+          }
         }
       }
     });
@@ -469,7 +484,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
       console.log('Failed to set CodeMirror option', err.message, { key, value });
     }
   };
-
+  useEffect(() => window.main.on('context-menu-command', (_, { key, tag }) =>
+    id === key && codeMirror.current?.replaceSelection(tag)), [id]);
   useEffect(() => tryToSetOption('hintOptions', hintOptions), [hintOptions]);
   useEffect(() => tryToSetOption('info', infoOptions), [infoOptions]);
   useEffect(() => tryToSetOption('jump', jumpOptions), [jumpOptions]);
@@ -507,6 +523,13 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(({
       style={style}
       data-editor-type="text"
       data-testid="CodeEditor"
+      onContextMenu={event => {
+        if (readOnly) {
+          return;
+        }
+        event.preventDefault();
+        window.main.showContextMenu({ key: id });
+      }}
     >
       <div
         className={classnames('editor__container', 'input', className)}

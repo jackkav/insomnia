@@ -1,11 +1,11 @@
 import { useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import { getRenderContext, getRenderContextAncestors, HandleGetRenderContext, HandleRender, render } from '../../../common/render';
 import { NUNJUCKS_TEMPLATE_GLOBAL_PROPERTY_NAME } from '../../../templating';
 import { getKeys } from '../../../templating/utils';
-import { selectActiveEnvironment, selectActiveRequest, selectActiveWorkspace } from '../../redux/selectors';
-
+import { RequestLoaderData } from '../../routes/request';
+import { WorkspaceLoaderData } from '../../routes/workspace';
 let getRenderContextPromiseCache: any = {};
 
 export const initializeNunjucksRenderPromiseCache = () => {
@@ -18,18 +18,17 @@ initializeNunjucksRenderPromiseCache();
  * Access to functions useful for Nunjucks rendering
  */
 export const useNunjucks = () => {
-  const environmentId = useSelector(selectActiveEnvironment)?._id;
-  const request = useSelector(selectActiveRequest);
-  const workspace = useSelector(selectActiveWorkspace);
+  const requestData = useRouteLoaderData('request/:requestId') as RequestLoaderData | undefined;
+  const workspaceData = useRouteLoaderData(':workspaceId') as WorkspaceLoaderData;
 
   const fetchRenderContext = useCallback(async () => {
-    const ancestors = await getRenderContextAncestors(request || workspace);
+    const ancestors = await getRenderContextAncestors(requestData?.activeRequest || workspaceData?.activeWorkspace);
     return getRenderContext({
-      request: request || undefined,
-      environmentId,
+      request: requestData?.activeRequest || undefined,
+      environmentId: workspaceData?.activeEnvironment._id,
       ancestors,
     });
-  }, [environmentId, request, workspace]);
+  }, [requestData?.activeRequest, workspaceData?.activeWorkspace, workspaceData?.activeEnvironment._id]);
 
   const handleGetRenderContext: HandleGetRenderContext = useCallback(async () => {
     const context = await fetchRenderContext();

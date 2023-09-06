@@ -13,7 +13,7 @@ import {
   EXPORT_TYPE_WEBSOCKET_REQUEST,
   EXPORT_TYPE_WORKSPACE,
 } from '../common/constants';
-import { generateId, pluralize } from '../common/misc';
+import { generateId } from '../common/misc';
 import * as _apiSpec from './api-spec';
 import * as _caCertificate from './ca-certificate';
 import * as _clientCertificate from './client-certificate';
@@ -163,18 +163,6 @@ export function canDuplicate(type: string) {
   return model ? model.canDuplicate : false;
 }
 
-export function getModelName(type: string, count = 1) {
-  const model = getModel(type);
-
-  if (!model) {
-    return 'Unknown';
-  } else if (count === 1) {
-    return model.name;
-  } else {
-    return pluralize(model.name);
-  }
-}
-
 export async function initModel<T extends BaseModel>(type: string, ...sources: Record<string, any>[]): Promise<T> {
   const model = getModel(type);
 
@@ -206,7 +194,7 @@ export async function initModel<T extends BaseModel>(type: string, ...sources: R
 
   // Migrate the model
   // NOTE: Do migration before pruning because we might need to look at those fields
-  const migratedDoc = await model.migrate(fullObject);
+  const migratedDoc = model.migrate(fullObject);
 
   // Prune extra keys from doc
   for (const key of Object.keys(migratedDoc)) {

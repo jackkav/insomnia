@@ -1,14 +1,14 @@
 import React, { FC, useEffect, useRef } from 'react';
 
-import { clickLink } from '../../../common/electron-helpers';
 import type { ResponseTimelineEntry } from '../../../main/network/libcurl-promise';
 import { CodeEditor, CodeEditorHandle } from '../codemirror/code-editor';
 
 interface Props {
   timeline: ResponseTimelineEntry[];
+  pinToBottom?: boolean;
 }
 
-export const ResponseTimelineViewer: FC<Props> = ({ timeline }) => {
+export const ResponseTimelineViewer: FC<Props> = ({ timeline, pinToBottom }) => {
   const editorRef = useRef<CodeEditorHandle>(null);
   const rows = timeline
     .map(({ name, value }, i, all) => {
@@ -43,13 +43,15 @@ export const ResponseTimelineViewer: FC<Props> = ({ timeline }) => {
 
   return (
     <CodeEditor
+      id="response-timeline-viewer"
       ref={editorRef}
       hideLineNumbers
       readOnly
-      onClickLink={clickLink}
+      onClickLink={window.main.openInBrowser}
       defaultValue={rows}
       className="pad-left"
       mode="curl"
+      pinToBottom={pinToBottom}
     />
   );
 };

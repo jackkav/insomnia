@@ -6,7 +6,6 @@ import {
 import { database as db } from '../common/database';
 import * as hotkeys from '../common/hotkeys';
 import { HttpVersions, KeyboardShortcut, Settings as BaseSettings, UpdateChannel } from '../common/settings';
-import { getMonkeyPatchedControlledSettings, omitControlledSettings } from './helpers/settings';
 import type { BaseModel } from './index';
 
 export type Settings = BaseModel & BaseSettings;
@@ -27,12 +26,10 @@ export function init(): BaseSettings {
     autoDetectColorScheme: false,
     autoHideMenuBar: false,
     autocompleteDelay: 1200,
-    allowNotificationRequests: true,
     clearOAuth2SessionOnRestart: true,
     darkTheme: getAppDefaultDarkTheme(),
     deviceId: null,
     disableHtmlPreviewJs: false,
-    disablePaidFeatureAds: false,
     disableResponsePreviewLinks: false,
     disableUpdateNotification: false,
     editorFontSize: 11,
@@ -49,11 +46,9 @@ export function init(): BaseSettings {
     fontSize: 13,
     fontVariantLigatures: false,
     forceVerticalLayout: false,
-
     hotKeyRegistry: hotkeys.newDefaultRegistry(),
     httpProxy: '',
     httpsProxy: '',
-    incognitoMode: false || Boolean(process.env.INSOMNIA_INCOGNITO_MODE),
     lightTheme: getAppDefaultLightTheme(),
     maxHistoryResponses: 20,
     maxRedirects: 10,
@@ -78,8 +73,13 @@ export function init(): BaseSettings {
 }
 
 export function migrate(doc: Settings) {
-  doc = migrateEnsureHotKeys(doc);
-  return doc;
+  try {
+    doc = migrateEnsureHotKeys(doc);
+    return doc;
+  } catch (e) {
+    console.log('[db] Error during settings migration', e);
+    throw e;
+  }
 }
 
 export async function all() {
@@ -89,25 +89,23 @@ export async function all() {
     settingsList = [await getOrCreate()];
   }
 
-  return settingsList.map(getMonkeyPatchedControlledSettings);
+  return settingsList;
 }
 
 async function create() {
   const settings = await db.docCreate<Settings>(type);
-  return getMonkeyPatchedControlledSettings(settings);
+  return settings;
 }
 
 export async function update(settings: Settings, patch: Partial<Settings>) {
-  const sanitizedPatch = omitControlledSettings(settings, patch);
-  const updatedSettings = await db.docUpdate<Settings>(settings, sanitizedPatch);
-  return getMonkeyPatchedControlledSettings(updatedSettings);
+  const updatedSettings = await db.docUpdate<Settings>(settings, patch);
+  return updatedSettings;
 }
 
 export async function patch(patch: Partial<Settings>) {
   const settings = await getOrCreate();
-  const sanitizedPatch = omitControlledSettings(settings, patch);
-  const updatedSettings = await db.docUpdate<Settings>(settings, sanitizedPatch);
-  return getMonkeyPatchedControlledSettings(updatedSettings);
+  const updatedSettings = await db.docUpdate<Settings>(settings, patch);
+  return updatedSettings;
 }
 
 export async function getOrCreate() {
@@ -116,7 +114,7 @@ export async function getOrCreate() {
   if (results.length === 0) {
     return await create();
   }
-  return getMonkeyPatchedControlledSettings(results[0]);
+  return results[0];
 }
 
 /**

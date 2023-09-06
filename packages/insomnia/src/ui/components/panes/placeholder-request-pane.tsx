@@ -1,24 +1,25 @@
 import React, { FC, useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
+import { useFetcher, useParams } from 'react-router-dom';
 
-import { createRequest } from '../../hooks/create-request';
-import { selectActiveWorkspace, selectSettings } from '../../redux/selectors';
+import { RootLoaderData } from '../../routes/root';
 import { Hotkey } from '../hotkey';
 import { Pane, PaneBody, PaneHeader } from './pane';
 
 export const PlaceholderRequestPane: FC = () => {
-  const { hotKeyRegistry } = useSelector(selectSettings);
-  const workspaceId = useSelector(selectActiveWorkspace)?._id;
-
-  const createHttpRequest = useCallback(() => {
-    if (workspaceId) {
-      createRequest({
-        requestType: 'HTTP',
-        parentId: workspaceId,
-        workspaceId: workspaceId,
-      });
-    }
-  }, [workspaceId]);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const { hotKeyRegistry } = settings;
+  const requestFetcher = useFetcher();
+  const { organizationId, projectId, workspaceId } = useParams() as { organizationId: string; projectId: string; workspaceId: string };
+  const createHttpRequest = useCallback(() =>
+    requestFetcher.submit({ requestType: 'HTTP', parentId: workspaceId },
+      {
+        action: `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/debug/request/new`,
+        method: 'post',
+        encType: 'application/json',
+      }), [requestFetcher, organizationId, projectId, workspaceId]);
 
   return (
     <Pane type="request">

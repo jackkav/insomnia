@@ -1,28 +1,27 @@
 import { LintOptions, ShowHintOptions, TextMarker } from 'codemirror';
 import { GraphQLInfoOptions } from 'codemirror-graphql/info';
 import { ModifiedGraphQLJumpOptions } from 'codemirror-graphql/jump';
-import { OpenDialogOptions } from 'electron';
+import type { OpenDialogOptions } from 'electron';
 import { readFileSync } from 'fs';
 import { DefinitionNode, DocumentNode, GraphQLNonNull, GraphQLSchema, Kind, NonNullTypeNode, OperationDefinitionNode, parse, typeFromAST } from 'graphql';
 import { buildClientSchema, getIntrospectionQuery } from 'graphql/utilities';
 import { Maybe } from 'graphql-language-service';
-import prettier from 'prettier';
 import React, { FC, useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 import { useLocalStorage } from 'react-use';
 
 import { CONTENT_TYPE_JSON } from '../../../../common/constants';
 import { database as db } from '../../../../common/database';
 import { markdownToHTML } from '../../../../common/markdown-to-html';
-import { jsonParseOr } from '../../../../common/misc';
+import { RENDER_PURPOSE_SEND } from '../../../../common/render';
 import type { ResponsePatch } from '../../../../main/network/libcurl-promise';
 import * as models from '../../../../models';
 import type { Request } from '../../../../models/request';
-import * as network from '../../../../network/network';
+import { fetchRequestData, responseTransform, sendCurlAndWriteTimeline, tryToInterpolateRequest, tryToTransformRequestWithPlugins } from '../../../../network/network';
 import { invariant } from '../../../../utils/invariant';
 import { jsonPrettify } from '../../../../utils/prettify/json';
-import { selectSettings } from '../../../redux/selectors';
+import { RootLoaderData } from '../../../routes/root';
 import { Dropdown, DropdownButton, DropdownItem, DropdownSection, ItemContent } from '../../base/dropdown';
 import { CodeEditor, CodeEditorHandle } from '../../codemirror/code-editor';
 import { GraphQLExplorer } from '../../graph-ql-explorer/graph-ql-explorer';
@@ -64,7 +63,6 @@ const isOperationDefinition = (def: DefinitionNode): def is OperationDefinitionN
 
 const fetchGraphQLSchemaForRequest = async ({
   requestId,
-  environmentId,
   url,
 }: {
   requestId: string;
@@ -75,9 +73,9 @@ const fetchGraphQLSchemaForRequest = async ({
     return;
   }
 
-  const request = await models.request.getById(requestId);
+  const req = await models.request.getById(requestId);
 
-  if (!request) {
+  if (!req) {
     return;
   }
 
@@ -88,10 +86,10 @@ const fetchGraphQLSchemaForRequest = async ({
       operationName: 'IntrospectionQuery',
     });
     const introspectionRequest = await db.upsert(
-      Object.assign({}, request, {
-        _id: request._id + '.graphql',
+      Object.assign({}, req, {
+        _id: req._id + '.graphql',
         settingMaxTimelineDataSize: 5000,
-        parentId: request._id,
+        parentId: req._id,
         isPrivate: true,
         // So it doesn't get synced or exported
         body: {
@@ -100,7 +98,22 @@ const fetchGraphQLSchemaForRequest = async ({
         },
       }),
     );
-    const response = await network.send(introspectionRequest._id, environmentId);
+    const { request,
+      environment,
+      settings,
+      clientCertificates,
+      caCert,
+      activeEnvironmentId } = await fetchRequestData(introspectionRequest._id);
+
+    const renderResult = await tryToInterpolateRequest(request, environment._id, RENDER_PURPOSE_SEND);
+    const renderedRequest = await tryToTransformRequestWithPlugins(renderResult);
+    const res = await sendCurlAndWriteTimeline(
+      renderedRequest,
+      clientCertificates,
+      caCert,
+      settings,
+    );
+    const response = await responseTransform(res, activeEnvironmentId, renderedRequest, renderResult.context);
     const statusCode = response.statusCode || 0;
     if (!response) {
       return {
@@ -161,6 +174,7 @@ interface State {
   documentAST: null | DocumentNode;
   disabledOperationMarkers: (TextMarker | undefined)[];
 }
+
 export const GraphQLEditor: FC<Props> = ({
   request,
   environmentId,
@@ -176,7 +190,11 @@ export const GraphQLEditor: FC<Props> = ({
     requestBody = { query: '' };
   }
   if (typeof requestBody.variables === 'string') {
-    requestBody.variables = jsonParseOr(requestBody.variables, '');
+    try {
+      requestBody.variables = JSON.parse(requestBody.variables);
+    } catch (err) {
+      requestBody.variables = '';
+    }
   }
   let documentAST;
   try {
@@ -236,11 +254,13 @@ export const GraphQLEditor: FC<Props> = ({
       isMounted = false;
     };
   }, [automaticFetch, environmentId, request._id, request.url, workspaceId]);
-
-  const { editorIndentWithTabs, editorIndentSize } = useSelector(selectSettings);
-  const beautifyRequestBody = () => {
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const { editorIndentWithTabs, editorIndentSize } = settings;
+  const beautifyRequestBody = async () => {
     const { body } = state;
-    const prettyQuery = prettier.format(body.query, {
+    const prettyQuery = (await import('prettier')).format(body.query, {
       parser: 'graphql',
       useTabs: editorIndentWithTabs,
       tabWidth: editorIndentSize,
@@ -291,7 +311,11 @@ export const GraphQLEditor: FC<Props> = ({
         }
       }
 
-      const content = getGraphQLContent(state.body, query);
+      if (!operationName) {
+        delete state.body.operationName;
+      }
+
+      const content = getGraphQLContent(state.body, query, operationName);
       onChange(content);
 
       setState(state => ({
@@ -500,11 +524,14 @@ export const GraphQLEditor: FC<Props> = ({
                   // again after a refresh
                   setState(state => ({ ...state, hideSchemaFetchErrors: false }));
                   setSchemaIsFetching(true);
-                  await fetchGraphQLSchemaForRequest({
+                  const newState = await fetchGraphQLSchemaForRequest({
                     requestId: request._id,
                     environmentId,
                     url: request.url,
                   });
+                  setSchemaFetchError(newState?.schemaFetchError);
+                  newState?.schema && setSchema(newState.schema);
+                  newState?.schema && setSchemaLastFetchTime(Date.now());
                   setSchemaIsFetching(false);
                 }}
               />
@@ -554,6 +581,7 @@ export const GraphQLEditor: FC<Props> = ({
 
       <div className="graphql-editor__query">
         <CodeEditor
+          id="graphql-editor"
           ref={editorRef}
           dynamicHeight
           showPrettifyButton
@@ -600,6 +628,7 @@ export const GraphQLEditor: FC<Props> = ({
       </h2>
       <div className="graphql-editor__variables">
         <CodeEditor
+          id="graphql-editor-variables"
           dynamicHeight
           enableNunjucks
           uniquenessKey={uniquenessKey ? uniquenessKey + '::variables' : undefined}

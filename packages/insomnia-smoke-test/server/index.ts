@@ -1,13 +1,15 @@
+import crypto from 'node:crypto';
+
 import express from 'express';
-import { graphqlHTTP } from 'express-graphql';
 import { readFileSync } from 'fs';
+import { createHandler } from 'graphql-http/lib/use/http';
 import { createServer } from 'https';
 import { join } from 'path';
 
 import { basicAuthRouter } from './basic-auth';
 import githubApi from './github-api';
 import gitlabApi from './gitlab-api';
-import { root, schema } from './graphql';
+import { schema } from './graphql';
 import { startGRPCServer } from './grpc';
 import { oauthRoutes } from './oauth';
 import { startWebSocketServer } from './websocket';
@@ -19,6 +21,13 @@ const grpcPort = 50051;
 
 app.get('/pets/:id', (req, res) => {
   res.status(200).send({ id: req.params.id });
+});
+
+app.get('/builds/check/*', (_req, res) => {
+  res.status(200).send({
+    url: 'https://github.com/Kong/insomnia/releases/download/core@2023.5.6/Insomnia.Core-2023.5.6.zip',
+    name: '2099.1.0',
+  });
 });
 
 app.get('/sleep', (_req, res) => {
@@ -34,7 +43,6 @@ app.get('/cookies', (_req, res) => {
 });
 
 app.use('/file', express.static('fixtures/files'));
-
 app.use('/auth/basic', basicAuthRouter);
 
 githubApi(app);
@@ -42,7 +50,7 @@ gitlabApi(app);
 
 app.get('/delay/seconds/:duration', (req, res) => {
   const delaySec = Number.parseInt(req.params.duration || '2');
-  setTimeout(function() {
+  setTimeout(function () {
     res.send(`Delayed by ${delaySec} seconds`);
   }, delaySec * 1000);
 });
@@ -53,11 +61,44 @@ app.get('/', (_req, res) => {
   res.status(200).send();
 });
 
-app.use('/graphql', graphqlHTTP({
-  schema: schema,
-  rootValue: root,
-  graphiql: true,
-}));
+app.all('/graphql', createHandler({ schema }));
+
+app.use(express.json()); // Used to parse JSON bodies
+
+// SSE routes
+let subscribers: { id: string; response: express.Response }[] = [];
+app.get('/events', (request, response) => {
+  const headers = {
+    'Content-Type': 'text/event-stream',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'no-cache',
+  };
+  response.writeHead(200, headers);
+  const subscriberId = crypto.randomUUID();
+  const data = `data: ${JSON.stringify({ id: subscriberId })}\n\n`;
+  response.write(data);
+  const subscriber = {
+    id: subscriberId,
+    response,
+  };
+  subscribers.push(subscriber);
+  setInterval(() => {
+    // const id = subscriberId;
+    const data = JSON.stringify({ message: 'Time: ' + new Date().toISOString().slice(11, 19) });
+    // response.write('id: ' + id + '\n');
+    response.write('data: ' + data + '\n\n');
+  }, 1000);
+  request.on('close', () => {
+    console.log(`${subscriberId} Connection closed`);
+    subscribers = subscribers.filter(sub => sub.id !== subscriberId);
+  });
+});
+app.post('/send-event', (request, response) => {
+  // Requires middleware to parse JSON body
+  console.log('Received event', request.body);
+  subscribers.forEach(subscriber => subscriber.response.write(`data: ${JSON.stringify(request.body)}\n\n`));
+  response.json({ success: true });
+});
 
 startWebSocketServer(app.listen(port, () => {
   console.log(`Listening at http://localhost:${port}`);

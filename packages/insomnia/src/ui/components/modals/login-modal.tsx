@@ -1,10 +1,8 @@
-import { clipboard } from 'electron';
-import React, { FormEvent, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import React, { FormEvent, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import * as session from '../../../account/session';
-import { clickLink } from '../../../common/electron-helpers';
 import { getLoginUrl, submitAuthCode } from '../../auth-session-provider';
-import { type ModalHandle, Modal } from '../base/modal';
+import { Modal, type ModalHandle } from '../base/modal';
 import { ModalBody } from '../base/modal-body';
 import { ModalFooter } from '../base/modal-footer';
 import { ModalHeader } from '../base/modal-header';
@@ -27,7 +25,7 @@ export interface LoginModalHandle extends ModalHandle {
   show: (options?: Options) => void;
 }
 
-export const LoginModal = memo(forwardRef<LoginModalHandle, {}>(function LoginModal({ ...props }, ref) {
+export const LoginModal = forwardRef<LoginModalHandle, {}>(function LoginModal({ ...props }, ref) {
   const modalRef = useRef<ModalHandle>(null);
   const tokenInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,7 +65,7 @@ export const LoginModal = memo(forwardRef<LoginModalHandle, {}>(function LoginMo
       modalRef.current?.show();
 
       if (!reauth) {
-        clickLink(url);
+        window.main.openInBrowser(url);
       }
     },
   }), []);
@@ -90,11 +88,11 @@ export const LoginModal = memo(forwardRef<LoginModalHandle, {}>(function LoginMo
   }, []);
 
   const copyUrl = useCallback(() => {
-    clipboard.writeText(state.url);
+    window.clipboard.writeText(state.url);
   }, [state.url]);
 
   const openUrl = useCallback(() => {
-    clickLink(state.url);
+    window.main.openInBrowser(state.url);
   }, [state.url]);
 
   const renderBody = () => {
@@ -187,7 +185,7 @@ export const LoginModal = memo(forwardRef<LoginModalHandle, {}>(function LoginMo
       </ModalFooter>
     </Modal>
   );
-}));
+});
 
 LoginModal.displayName = 'LoginModal';
 

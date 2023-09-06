@@ -5,29 +5,17 @@ import { test } from '../../playwright/test';
 
 test.describe('Design interactions', async () => {
   test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
-  test.fixme('Requests are auto-generated when switching tabs', async ({ page }) => {
-    // TODO(filipe) - this is currently not working
-    await page.getByTestId('project').click();
-    await expect(true).toBeTruthy();
-  });
-
-  test.fixme('Can filter values in Design sidebar', async ({ page }) => {
-    // TODO(filipe) implement in another PR
-    await page.getByTestId('project').click();
-    await expect(true).toBeTruthy();
-  });
 
   test('Unit Test interactions', async ({ app, page }) => {
     // Setup
-    await page.getByTestId('project').click();
-    await page.getByRole('button', { name: 'Create' }).click();
+    await page.getByRole('button', { name: 'Create in project' }).click();
     const text = await loadFixture('unit-test.yaml');
     await app.evaluate(async ({ clipboard }, text) => clipboard.writeText(text), text);
-    await page.getByRole('menuitem', { name: 'Import' }).click();
+    await page.getByRole('menuitemradio', { name: 'Import' }).click();
     await page.getByText('Clipboard').click();
     await page.getByRole('button', { name: 'Scan' }).click();
-    await page.getByRole('button', { name: 'Import' }).click();
-
+    await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+    await page.getByText('unit-test.yaml').click();
     // Switch to Test tab
     await page.click('a:has-text("Test")');
 

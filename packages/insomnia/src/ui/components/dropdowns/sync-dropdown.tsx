@@ -1,6 +1,6 @@
 import classnames from 'classnames';
 import React, { FC, Fragment, useCallback, useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate, useParams, useRouteLoaderData } from 'react-router-dom';
 import { useInterval, useMount } from 'react-use';
 
 import * as session from '../../../account/session';
@@ -11,26 +11,26 @@ import { strings } from '../../../common/strings';
 import * as models from '../../../models';
 import { isRemoteProject, Project } from '../../../models/project';
 import type { Workspace } from '../../../models/workspace';
-import { Status } from '../../../sync/types';
+import { Snapshot, Status } from '../../../sync/types';
 import { pushSnapshotOnInitialize } from '../../../sync/vcs/initialize-backend-project';
 import { logCollectionMovedToProject } from '../../../sync/vcs/migrate-collections';
 import { BackendProjectWithTeam } from '../../../sync/vcs/normalize-backend-project-team';
 import { pullBackendProject } from '../../../sync/vcs/pull-backend-project';
 import { interceptAccessError } from '../../../sync/vcs/util';
 import { VCS } from '../../../sync/vcs/vcs';
-import { activateWorkspace } from '../../redux/modules/workspace';
-import { selectActiveWorkspaceMeta, selectRemoteProjects, selectSyncItems } from '../../redux/selectors';
+import { WorkspaceLoaderData } from '../../routes/workspace';
 import { Dropdown, DropdownButton, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
 import { Link } from '../base/link';
 import { HelpTooltip } from '../help-tooltip';
 import { showError, showModal } from '../modals';
+import { GitRepositorySettingsModal } from '../modals/git-repository-settings-modal';
 import { LoginModal } from '../modals/login-modal';
 import { SyncBranchesModal } from '../modals/sync-branches-modal';
 import { SyncDeleteModal } from '../modals/sync-delete-modal';
 import { SyncHistoryModal } from '../modals/sync-history-modal';
 import { SyncStagingModal } from '../modals/sync-staging-modal';
+import { Button } from '../themed-button';
 import { Tooltip } from '../tooltip';
-
 // TODO: handle refetching logic in one place not here in a component
 
 // Refresh dropdown periodically
@@ -51,6 +51,7 @@ interface State {
   };
   status: Status;
   initializing: boolean;
+  history: Snapshot[];
   historyCount: number;
   loadingPull: boolean;
   loadingProjectPull: boolean;
@@ -65,6 +66,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
       ahead: 0,
       behind: 0,
     },
+    history: [],
     historyCount: 0,
     initializing: true,
     loadingPull: false,
@@ -77,10 +79,14 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
     },
     remoteBackendProjects: [],
   });
-  const dispatch = useDispatch();
-  const remoteProjects = useSelector(selectRemoteProjects);
-  const syncItems = useSelector(selectSyncItems);
-  const workspaceMeta = useSelector(selectActiveWorkspaceMeta);
+  const { organizationId, projectId } = useParams<{ organizationId: string; projectId: string }>();
+  const navigate = useNavigate();
+  const {
+    activeWorkspaceMeta,
+    projects,
+    syncItems,
+  } = useRouteLoaderData(':workspaceId') as WorkspaceLoaderData;
+  const remoteProjects = projects.filter(isRemoteProject);
 
   const refetchRemoteBranch = useCallback(async () => {
     if (session.isLoggedIn()) {
@@ -108,11 +114,13 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
     }
     const localBranches = (await vcs.getBranches()).sort();
     const currentBranch = await vcs.getBranch();
+    const history = await vcs.getHistory();
     const historyCount = await vcs.getHistoryCount();
     const status = await vcs.status(syncItems, {});
     setState(state => ({
       ...state,
       status,
+      history,
       historyCount,
       localBranches,
       currentBranch,
@@ -125,6 +133,11 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
     refetchRemoteBranch();
   }, REFRESH_PERIOD);
 
+  const [isGitRepoSettingsModalOpen, setIsGitRepoSettingsModalOpen] = useState(false);
+  const [isSyncDeleteModalOpen, setIsSyncDeleteModalOpen] = useState(false);
+  const [isSyncHistoryModalOpen, setIsSyncHistoryModalOpen] = useState(false);
+  const [isSyncStagingModalOpen, setIsSyncStagingModalOpen] = useState(false);
+  const [isSyncBranchesModalOpen, setIsSyncBranchesModalOpen] = useState(false);
   useMount(async () => {
     setState(state => ({
       ...state,
@@ -133,7 +146,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
 
     try {
       // NOTE pushes the first snapshot automatically
-      await pushSnapshotOnInitialize({ vcs, workspace, workspaceMeta, project });
+      await pushSnapshotOnInitialize({ vcs, workspace, workspaceMeta: activeWorkspaceMeta, project });
       await refreshVCSAndRefetchRemote();
     } catch (err) {
       console.log('[sync_menu] Error refreshing sync state', err);
@@ -162,10 +175,10 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
       loadingProjectPull: true,
     }));
     const pulledIntoProject = await pullBackendProject({ vcs, backendProject, remoteProjects });
-    if (pulledIntoProject._id !== project._id) {
+    if (pulledIntoProject.project._id !== project._id) {
       // If pulled into a different project, reactivate the workspace
-      await dispatch(activateWorkspace({ workspaceId: workspace._id }));
-      logCollectionMovedToProject(workspace, pulledIntoProject);
+      navigate(`/organization/${organizationId}/project/${projectId}/workspace/${workspace._id}`);
+      logCollectionMovedToProject(workspace, pulledIntoProject.project);
     }
     await refreshVCSAndRefetchRemote();
     setState(state => ({
@@ -280,6 +293,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
     localBranches,
     currentBranch,
     status,
+    history,
     historyCount,
     loadingPull,
     loadingPush,
@@ -338,23 +352,61 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
     return (
       <div>
         <Dropdown
-          style={{
-            marginLeft: 'var(--padding-md)',
-          }}
           className="wide tall"
           onOpen={() => refreshVCSAndRefetchRemote()}
           aria-label="Select a project to sync with"
           triggerButton={
             <DropdownButton
-              variant='outlined'
+              size="medium"
+              removeBorderRadius
               disableHoverBehavior={false}
               removePaddings={false}
-              className="btn--clicky-small btn-sync wide text-left overflow-hidden row-spaced"
+              variant='text'
+              style={{
+                width: '100%',
+                borderRadius: '0',
+                borderTop: '1px solid var(--hl-md)',
+                height: 'var(--line-height-sm)',
+              }}
             >
-              <i className="fa fa-code-fork " /> Setup Sync
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-start',
+                  alignItems: 'center',
+                  gap: 'var(--padding-xs)',
+                  width: '100%',
+                }}
+              >
+                <i className="fa fa-cloud" /> Setup Sync
+              </div>
             </DropdownButton>
           }
         >
+          <DropdownSection>
+            <DropdownItem
+              key='gitSync'
+              aria-label='Setup Git Sync'
+            >
+              <Button
+                variant='contained'
+                bg='surprise'
+                onClick={async () => {
+                  setIsGitRepoSettingsModalOpen(true);
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--padding-sm)',
+                  margin: '0 var(--padding-sm)',
+                  justifyContent: 'flex-start!important',
+                }}
+              >
+                <i className="fa-brands fa-git-alt" /> Use Git Sync
+              </Button>
+            </DropdownItem>
+          </DropdownSection>
           <DropdownSection
             aria-label='Sync Projects List'
             items={remoteBackendProjects.length === 0 ? emptyDropdownItemsArray : []}
@@ -363,8 +415,9 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
             {p =>
               <DropdownItem
                 key={p.id}
+                textValue={p.name}
               >
-                <ItemContent {...p} />
+                <ItemContent {...p} label={p.name} />
               </DropdownItem>
             }
           </DropdownSection>
@@ -376,7 +429,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
             {p =>
               <DropdownItem
                 key={p.id}
-                arial-label={`Pull ${p.name}`}
+                aria-label={`Pull ${p.name}`}
               >
                 <ItemContent
                   icon="cloud-download"
@@ -387,6 +440,11 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
             }
           </DropdownSection>
         </Dropdown>
+        {isGitRepoSettingsModalOpen && (
+          <GitRepositorySettingsModal
+            onHide={() => setIsGitRepoSettingsModalOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -404,9 +462,8 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
   return (
     <div>
       <Dropdown
-        aria-label='Select a branch to sync with'
-        style={{ marginLeft: 'var(--padding-md)' }}
         className="wide tall"
+        aria-label='Select a branch to sync with'
         onOpen={() => refreshVCSAndRefetchRemote()}
         closeOnSelect={false}
         isDisabled={initializing}
@@ -414,56 +471,101 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
           currentBranch === null ?
             <Fragment>Sync</Fragment> :
             <DropdownButton
-              variant='outlined'
+              size="medium"
+              removeBorderRadius
               disableHoverBehavior={false}
               removePaddings={false}
-              className="btn--clicky-small btn-sync wide text-left overflow-hidden row-spaced"
+              variant='text'
+              style={{
+                width: '100%',
+                borderRadius: '0',
+                borderTop: '1px solid var(--hl-md)',
+                height: 'var(--line-height-sm)',
+              }}
             >
-              <div className="ellipsis">
-                <i className="fa fa-code-fork space-right" />{' '}
-                {initializing ? 'Initializing...' : currentBranch}
-              </div>
-              <div className="flex space-left">
-                <Tooltip message={snapshotToolTipMsg} delay={800} position="bottom">
-                  <i
-                    className={classnames('fa fa-cube fa--fixed-width', {
-                      'super-duper-faint': !canCreateSnapshot,
-                    })}
-                  />
-                </Tooltip>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-start',
+                  alignItems: 'center',
+                  gap: 'var(--padding-xs)',
+                  width: '100%',
+                }}
+              >
+                <div className="ellipsis">
+                  <i className="fa fa-cloud space-right" />{' '}
+                  {initializing ? 'Initializing...' : currentBranch}
+                </div>
+                <div className="flex space-left">
+                  <Tooltip message={snapshotToolTipMsg} delay={800} position="bottom">
+                    <i
+                      style={{
+                        color: canCreateSnapshot ? 'var(--color-notice)' : 'var(--color-hl)',
+                      }}
+                      className={classnames('fa fa-cube fa--fixed-width', {
+                        'super-duper-faint': !canCreateSnapshot,
+                      })}
+                    />
+                  </Tooltip>
 
-                {/* Only show cloud icons if logged in */}
-                {session.isLoggedIn() && (
-                  <Fragment>
-                    {loadingPull ? (
-                      loadIcon
-                    ) : (
-                      <Tooltip message={pullToolTipMsg} delay={800} position="bottom">
-                        <i
-                          className={classnames('fa fa-cloud-download fa--fixed-width', {
-                            'super-duper-faint': !canPull,
-                          })}
-                        />
-                      </Tooltip>
-                    )}
+                  {/* Only show cloud icons if logged in */}
+                  {session.isLoggedIn() && (
+                    <Fragment>
+                      {loadingPull ? (
+                        loadIcon
+                      ) : (
+                        <Tooltip message={pullToolTipMsg} delay={800} position="bottom">
+                          <i
+                            className={classnames('fa fa-cloud-download fa--fixed-width', {
+                              'super-duper-faint': !canPull,
+                            })}
+                          />
+                        </Tooltip>
+                      )}
 
-                    {loadingPush ? (
-                      loadIcon
-                    ) : (
-                      <Tooltip message={pushToolTipMsg} delay={800} position="bottom">
-                        <i
-                          className={classnames('fa fa-cloud-upload fa--fixed-width', {
-                            'super-duper-faint': !canPush,
-                          })}
-                        />
-                      </Tooltip>
-                    )}
-                  </Fragment>
-                )}
+                      {loadingPush ? (
+                        loadIcon
+                      ) : (
+                        <Tooltip message={pushToolTipMsg} delay={800} position="bottom">
+                          <i
+                            className={classnames('fa fa-cloud-upload fa--fixed-width', {
+                              'super-duper-faint': !canPush,
+                            })}
+                          />
+                        </Tooltip>
+                      )}
+                    </Fragment>
+                  )}
+                </div>
               </div>
+
             </DropdownButton>
         }
       >
+        <DropdownSection>
+          <DropdownItem
+            key='gitSync'
+            aria-label='Setup Git Sync'
+          >
+            <Button
+              variant='contained'
+              bg='surprise'
+              onClick={async () => {
+                setIsGitRepoSettingsModalOpen(true);
+              }}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--padding-sm)',
+                margin: '0 var(--padding-sm)',
+                justifyContent: 'flex-start!important',
+              }}
+            >
+              <i className="fa-brands fa-git-alt" /> Use Git Sync
+            </Button>
+          </DropdownItem>
+        </DropdownSection>
         <DropdownSection
           aria-label='Sync Branches List'
           title={syncMenuHeader}
@@ -483,7 +585,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
             <ItemContent
               icon="code-fork"
               label="Branches"
-              onClick={() => showModal(SyncBranchesModal, { onHide: refreshVCSAndRefetchRemote })}
+              onClick={() => setIsSyncBranchesModalOpen(true)}
             />
           </DropdownItem>
 
@@ -492,7 +594,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
               icon="remove"
               isDisabled={historyCount === 0}
               label={<>Delete {strings.collection.singular}</>}
-              onClick={() => showModal(SyncDeleteModal, { onHide: refreshVCSAndRefetchRemote })}
+              onClick={() => setIsSyncDeleteModalOpen(true)}
             />
           </DropdownItem>
         </DropdownSection>
@@ -530,7 +632,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
               isDisabled={historyCount === 0}
               icon="clock-o"
               label="History"
-              onClick={() => showModal(SyncHistoryModal)}
+              onClick={() => setIsSyncHistoryModalOpen(true)}
             />
           </DropdownItem>
 
@@ -549,11 +651,7 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
               isDisabled={!canCreateSnapshot}
               icon="cube"
               label="Create Snapshot"
-              onClick={() =>
-                showModal(SyncStagingModal, {
-                  onSnapshot: refreshVCSAndRefetchRemote,
-                  handlePush,
-                })
+              onClick={() => setIsSyncStagingModalOpen(true)
               }
             />
           </DropdownItem>
@@ -576,6 +674,51 @@ export const SyncDropdown: FC<Props> = ({ vcs, workspace, project }) => {
           </DropdownItem>
         </DropdownSection>
       </Dropdown>
+      {isGitRepoSettingsModalOpen && (
+        <GitRepositorySettingsModal
+          onHide={() => setIsGitRepoSettingsModalOpen(false)}
+        />
+      )}
+      {isSyncDeleteModalOpen && (
+        <SyncDeleteModal
+          vcs={vcs}
+          onHide={() => {
+            refreshVCSAndRefetchRemote();
+            setIsSyncDeleteModalOpen(false);
+          }}
+        />
+      )}
+      {isSyncBranchesModalOpen && (
+        <SyncBranchesModal
+          vcs={vcs}
+          onHide={() => {
+            refreshVCSAndRefetchRemote();
+            setIsSyncBranchesModalOpen(false);
+          }}
+        />
+      )}
+      {isSyncStagingModalOpen && (
+        <SyncStagingModal
+          vcs={vcs}
+          branch={currentBranch}
+          onSnapshot={refreshVCSAndRefetchRemote}
+          handlePush={handlePush}
+          onHide={() => setIsSyncStagingModalOpen(false)}
+        />
+      )}
+      {/* {isSyncMergeModalOpen && (
+        <SyncMergeModal
+          onHide={() => setIsSyncMergeModalOpen(false)}
+        />
+      )} */}
+      {isSyncHistoryModalOpen && (
+        <SyncHistoryModal
+          vcs={vcs}
+          branch={currentBranch}
+          history={history}
+          onHide={() => setIsSyncHistoryModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

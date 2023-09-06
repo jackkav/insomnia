@@ -3,9 +3,8 @@ import crypto from 'crypto';
 import path from 'path';
 
 import * as crypt from '../../account/crypt';
-import * as fetch from '../../account/fetch';
 import * as session from '../../account/session';
-import { chunkArray, generateId } from '../../common/misc';
+import { generateId } from '../../common/misc';
 import { strings } from '../../common/strings';
 import { BaseModel } from '../../models';
 import Store from '../store';
@@ -44,6 +43,14 @@ const EMPTY_HASH = crypto.createHash('sha1').digest('hex').replace(/./g, '0');
 
 type ConflictHandler = (conflicts: MergeConflict[]) => Promise<MergeConflict[]>;
 
+// breaks one array into multiple arrays of size chunkSize
+export function chunkArray<T>(arr: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+  for (let i = 0, j = arr.length; i < j; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
 export class VCS {
   _store: Store;
   _driver: BaseDriver;
@@ -475,7 +482,7 @@ export class VCS {
   async pull(candidates: StatusCandidate[], teamId: string | undefined | null) {
     await this._getOrCreateRemoteBackendProject(teamId || '');
     const localBranch = await this._getCurrentBranch();
-    const tmpBranchForRemote = await this._fetch(localBranch.name + '.hidden', localBranch.name);
+    const tmpBranchForRemote = await this.customFetch(localBranch.name + '.hidden', localBranch.name);
     // Merge branch and ensure that we use the remote's history when merging
     const message = `Synced latest changes from ${localBranch.name}`;
     const delta = await this._merge(
@@ -552,7 +559,7 @@ export class VCS {
     await this._queryPushSnapshots(snapshots);
   }
 
-  async _fetch(localBranchName: string, remoteBranchName: string) {
+  async customFetch(localBranchName: string, remoteBranchName: string) {
     const remoteBranch: Branch | null = await this._queryBranch(remoteBranchName);
 
     if (!remoteBranch) {
@@ -710,14 +717,12 @@ export class VCS {
   ): Promise<Record<string, any>> {
     const { sessionId } = this._assertSession();
 
-    const { data, errors } = await fetch.post(
-      '/graphql?' + name,
-      {
-        query,
-        variables,
-      },
+    const { data, errors } = await window.main.insomniaFetch<{ data: {}; errors: [{ message: string }] }>({
+      method: 'POST',
+      path: '/graphql?' + name,
+      data: { query, variables },
       sessionId,
-    );
+    });
 
     if (errors && errors.length) {
       console.log(`[sync] Failed to query ${name}`, errors);

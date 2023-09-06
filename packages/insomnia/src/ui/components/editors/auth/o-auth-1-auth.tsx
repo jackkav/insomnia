@@ -1,4 +1,5 @@
 import React, { FC } from 'react';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import {
   OAuth1SignatureMethod,
@@ -7,7 +8,7 @@ import {
   SIGNATURE_METHOD_PLAINTEXT,
   SIGNATURE_METHOD_RSA_SHA1,
 } from '../../../../network/o-auth-1/constants';
-import { useActiveRequest } from '../../../hooks/use-active-request';
+import { RequestLoaderData } from '../../../routes/request';
 import { AuthInputRow } from './components/auth-input-row';
 import { AuthPrivateKeyRow } from './components/auth-private-key-row';
 import { AuthSelectRow } from './components/auth-select-row';
@@ -33,7 +34,7 @@ const signatureMethodOptions: {name: string; value: OAuth1SignatureMethod}[] = [
 }];
 
 export const OAuth1Auth: FC = () => {
-  const { activeRequest: { authentication: { signatureMethod } } } = useActiveRequest();
+  const { activeRequest: { authentication: { signatureMethod } } } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
 
   return (
     <AuthTableBody>

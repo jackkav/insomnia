@@ -1,5 +1,20 @@
 # CLI
 
+## install node version of libcurl
+
+npm install will download the electron version of libcurl but for inso we need the node version
+
+```shell
+node_modules/.bin/node-pre-gyp install --update-binary --directory node_modules/@getinsomnia/node-libcurl
+```
+
+to download the electron version of node-libcurl you should remove the module and npm install again
+
+```shell
+rm -rf node_modules/@getinsomnia/
+npm install
+```
+
 ## Run CLI Smoke Tests
 
 ```shell
@@ -18,16 +33,25 @@ From project root, in separate terminals:
 
 ```sh
 # start smoke test api
-npm run serve --prefix packages/insomnia-smoke-test
+npm run serve -w packages/insomnia-smoke-test
 
 # build send-request
-npm run build:sr --prefix packages/insomnia
+npm run build:sr -w packages/insomnia
 
 # watch inso
-npm run start --prefix packages/insomnia-inso
+npm run start -w packages/insomnia-inso
 
-# run api test
+# run api test with dev bundle
 $PWD/packages/insomnia-inso/bin/inso run test "Echo Test Suite" --src $PWD/packages/insomnia-smoke-test/fixtures/inso-nedb --env Dev --verbose
+```
+
+## How to debug pkg
+
+```sh
+# run modify package command and then a unit test
+npm run package -w packages/insomnia-inso && \
+$PWD/packages/insomnia-inso/binaries/inso run test "Echo Test Suite" --src $PWD/packages/insomnia-smoke-test/fixtures/inso-nedb --env Dev --verbose
+
 ```
 
 ## How to update the `inso-nedb` fixtures

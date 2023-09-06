@@ -10,7 +10,7 @@ export const prefix = 'spc';
 
 export const canDuplicate = true;
 
-export const canSync = false;
+export const canSync = true;
 
 export interface BaseApiSpec {
   fileName: string;
@@ -32,7 +32,7 @@ export function init(): BaseApiSpec {
   };
 }
 
-export async function migrate(doc: ApiSpec) {
+export function migrate(doc: ApiSpec) {
   return doc;
 }
 

@@ -33,9 +33,11 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
 
-      - name: Bootstrap packages
-        run: npm run bootstrap
+      - name: Install packages
+        run: npm ci
 
       - name: Package app (MacOS only)
         if: matrix.os == 'macos-latest'
@@ -60,7 +62,10 @@ jobs:
           echo "INSO_VERSION=$(jq .version packages/insomnia-inso/package.json -rj)" >> $GITHUB_ENV
 
       - name: Package inso
-        run: npm run inso-package
+        run: |
+          echo "Replacing electron binary with node binary"
+          node_modules/.bin/node-pre-gyp install --update-binary --directory node_modules/@getinsomnia/node-libcurl
+          npm run inso-package
         env:
           VERSION: ${{ env.INSO_VERSION }}
 
@@ -79,27 +84,29 @@ jobs:
 
       - name: Notarize Inso CLI installer (macOS only)
         if: matrix.os == 'macos-latest'
-        uses: devbotsxyz/xcode-notarize@v1
+        uses: lando/notarize-action@v2
         with:
           product-path: packages/insomnia-inso/artifacts/inso-${{ matrix.os }}-${{ env.INSO_VERSION }}.pkg
           primary-bundle-id: com.insomnia.inso
           appstore-connect-username: ${{ secrets.DESIGNER_APPLE_ID }}
           appstore-connect-password: ${{ secrets.DESIGNER_APPLE_ID_PASSWORD }}
+          appstore-connect-team-id: FX44YY62GV
 
       - name: Staple Inso CLI installer (macOS only)
         if: matrix.os == 'macos-latest'
-        uses: devbotsxyz/xcode-staple@v1
+        uses: BoundfoxStudios/action-xcode-staple@v1
         with:
           product-path: packages/insomnia-inso/artifacts/inso-${{ matrix.os }}-${{ env.INSO_VERSION }}.pkg
 
       - name: Notarize Inso CLI binary (macOS only)
         if: matrix.os == 'macos-latest'
-        uses: devbotsxyz/xcode-notarize@v1
+        uses: lando/notarize-action@v2
         with:
           product-path: packages/insomnia-inso/binaries/inso
           primary-bundle-id: com.insomnia.inso-binary
           appstore-connect-username: ${{ secrets.DESIGNER_APPLE_ID }}
           appstore-connect-password: ${{ secrets.DESIGNER_APPLE_ID_PASSWORD }}
+          appstore-connect-team-id: FX44YY62GV
 
       - name: Create inso artifacts
         run: npm run inso-package:artifacts
@@ -176,7 +183,7 @@ jobs:
             git merge --no-ff release/<replaced with version>
 
             # Solve merge conflicts ...
-            # If there's package-lock conflicts, run `npm run bootstrap` and commit the package-lock changes
+            # If there's package-lock conflicts, run `npm install` and commit the package-lock changes
 
             git push
             ```

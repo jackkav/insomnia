@@ -60,7 +60,7 @@ export function init(): BaseWebSocketResponse {
   };
 }
 
-export async function migrate(doc: Response) {
+export function migrate(doc: Response) {
   return doc;
 }
 
@@ -80,6 +80,10 @@ export function hookRemove(doc: WebSocketResponse, consoleLog: typeof console.lo
 
 export function getById(id: string) {
   return db.get<WebSocketResponse>(type, id);
+}
+
+export function findByParentId(parentId: string) {
+  return db.find<WebSocketResponse>(type, { parentId: parentId });
 }
 
 export async function all() {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { globalBeforeEach } from '../../__jest__/before-each';
 import { CONTENT_TYPE_GRAPHQL } from '../../common/constants';
-import { newBodyGraphQL, updateMimeType } from '../../ui/components/panes/request-pane';
+import { newBodyGraphQL, updateMimeType } from '../../ui/components/dropdowns/content-type-dropdown';
 import * as models from '../index';
 
 describe('init()', () => {
@@ -119,7 +119,7 @@ describe('updateMimeType()', () => {
     const newRequest = await updateMimeType(request, 'text/html');
     expect(newRequest.headers).toEqual([
       {
-        name: 'content-tYPE',
+        name: 'Content-Type',
         value: 'text/html',
       },
       {
@@ -133,7 +133,7 @@ describe('updateMimeType()', () => {
     ]);
   });
 
-  it('replaces header when exists', async () => {
+  it('replaces header when exists2', async () => {
     const request = await models.request.create({
       name: 'My Request',
       parentId: 'fld_1',
@@ -148,7 +148,7 @@ describe('updateMimeType()', () => {
     const newRequest = await updateMimeType(request, 'text/html');
     expect(newRequest.headers).toEqual([
       {
-        name: 'content-tYPE',
+        name: 'Content-Type',
         value: 'text/html',
       },
     ]);
@@ -169,34 +169,6 @@ describe('updateMimeType()', () => {
     const newRequest = await updateMimeType(request, null);
     expect(newRequest.body).toEqual({});
     expect(newRequest.headers).toEqual([]);
-  });
-
-  it('uses saved body when provided', async () => {
-    const request = await models.request.create({
-      name: 'My Request',
-      parentId: 'fld_1',
-      body: {
-        text: 'My Data',
-      },
-    });
-    expect(request).not.toBeNull();
-    const newRequest = await updateMimeType(request, 'application/json', false, {
-      text: 'Saved Data',
-    });
-    expect(newRequest.body.text).toEqual('Saved Data');
-  });
-
-  it('uses existing body when saved body not provided', async () => {
-    const request = await models.request.create({
-      name: 'My Request',
-      parentId: 'fld_1',
-      body: {
-        text: 'My Data',
-      },
-    });
-    expect(request).not.toBeNull();
-    const newRequest = await updateMimeType(request, 'application/json', false, {});
-    expect(newRequest.body.text).toEqual('My Data');
   });
 });
 

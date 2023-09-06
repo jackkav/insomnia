@@ -11,8 +11,6 @@ import {
   PREVIEW_MODE_FRIENDLY,
   PREVIEW_MODE_RAW,
 } from '../../../common/constants';
-import { clickLink } from '../../../common/electron-helpers';
-import { xmlDecode } from '../../../common/misc';
 import { CodeEditor, CodeEditorHandle } from '../codemirror/code-editor';
 import { useDocBodyKeyboardShortcuts } from '../keydown-binder';
 import { ResponseCSVViewer } from './response-csv-viewer';
@@ -26,7 +24,18 @@ let alwaysShowLargeResponses = false;
 export interface ResponseViewerHandle {
   refresh: () => void;
 }
+export function xmlDecode(input: string) {
+  const ESCAPED_CHARACTERS_MAP = {
+    '&amp;': '&',
+    '&quot;': '"',
+    '&lt;': '<',
+    '&gt;': '>',
+  };
 
+  return input.replace(/(&quot;|&lt;|&gt;|&amp;)/g, (_: string, item: keyof typeof ESCAPED_CHARACTERS_MAP) => (
+    ESCAPED_CHARACTERS_MAP[item])
+  );
+}
 export interface ResponseViewerProps {
   bytes: number;
   contentType: string;
@@ -255,8 +264,7 @@ export const ResponseViewer = ({
         body={getBodyAsString()}
         key={disableHtmlPreviewJs ? 'no-js' : 'yes-js'}
         url={url}
-        webpreferences={`disableDialogs=true, javascript=${disableHtmlPreviewJs ? 'no' : 'yes'
-        }`}
+        webpreferences={`disableDialogs=true, javascript=${disableHtmlPreviewJs ? 'no' : 'yes'}`}
       />
     );
   }
@@ -322,6 +330,7 @@ export const ResponseViewer = ({
   if (previewMode === PREVIEW_MODE_RAW) {
     return (
       <CodeEditor
+        id="raw-response-viewer"
         key={responseId}
         ref={editorRef}
         className="raw-editor"
@@ -339,6 +348,7 @@ export const ResponseViewer = ({
   // Show everything else as "source"
   return (
     <CodeEditor
+      id="response-viewer"
       key={disablePreviewLinks ? 'links-disabled' : 'links-enabled'}
       ref={editorRef}
       autoPrettify
@@ -347,7 +357,7 @@ export const ResponseViewer = ({
       filterHistory={filterHistory}
       mode={getBodyAsString()?.match(/^\s*<\?xml [^?]*\?>/) ? 'application/xml' : _getContentType()}
       noMatchBrackets
-      onClickLink={url => !disablePreviewLinks && clickLink(getBodyAsString()?.match(/^\s*<\?xml [^?]*\?>/) ? xmlDecode(url) : url)}
+      onClickLink={url => !disablePreviewLinks && window.main.openInBrowser(getBodyAsString()?.match(/^\s*<\?xml [^?]*\?>/) ? xmlDecode(url) : url)}
       placeholder="..."
       readOnly
       uniquenessKey={responseId}

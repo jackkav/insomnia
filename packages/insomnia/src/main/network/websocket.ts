@@ -1,7 +1,6 @@
-import electron, { ipcMain } from 'electron';
+import electron, { BrowserWindow, ipcMain } from 'electron';
 import fs from 'fs';
 import { IncomingMessage } from 'http';
-import mkdirp from 'mkdirp';
 import path from 'path';
 import tls, { KeyObject, PxfObject } from 'tls';
 import { v4 as uuidV4 } from 'uuid';
@@ -19,15 +18,15 @@ import { generateId, getSetCookieHeaders } from '../../common/misc';
 import { webSocketRequest } from '../../models';
 import * as models from '../../models';
 import { CookieJar } from '../../models/cookie-jar';
-import { Environment } from '../../models/environment';
 import { RequestAuthentication, RequestHeader } from '../../models/request';
 import { BaseWebSocketRequest } from '../../models/websocket-request';
 import type { WebSocketResponse } from '../../models/websocket-response';
 import { COOKIE, HEADER, QUERY_PARAMS } from '../../network/api-key/constants';
 import { getBasicAuthHeader } from '../../network/basic-auth/get-header';
 import { getBearerAuthHeader } from '../../network/bearer-auth/get-header';
-import { addSetCookiesToToughCookieJar } from '../../network/network';
+import { addSetCookiesToToughCookieJar } from '../../network/set-cookie-util';
 import { urlMatchesCertHost } from '../../network/url-matches-cert-host';
+import { invariant } from '../../utils/invariant';
 import { setDefaultProtocol } from '../../utils/url/protocol';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '../../utils/url/querystring';
 
@@ -103,7 +102,7 @@ interface OpenWebSocketRequestOptions {
   initialPayload?: string;
 }
 const openWebSocketConnection = async (
-  event: Electron.IpcMainInvokeEvent,
+  _event: Electron.IpcMainInvokeEvent,
   options: OpenWebSocketRequestOptions
 ): Promise<void> => {
   const existingConnection = WebSocketConnections.get(options.requestId);
@@ -119,15 +118,19 @@ const openWebSocketConnection = async (
   }
 
   const responsesDir = path.join(process.env['INSOMNIA_DATA_PATH'] || electron.app.getPath('userData'), 'responses');
-  mkdirp.sync(responsesDir);
+  fs.mkdirSync(responsesDir, { recursive: true });
+
   const responseBodyPath = path.join(responsesDir, uuidV4() + '.response');
   eventLogFileStreams.set(options.requestId, fs.createWriteStream(responseBodyPath));
   const timelinePath = path.join(responsesDir, responseId + '.timeline');
   timelineFileStreams.set(options.requestId, fs.createWriteStream(timelinePath));
 
   const workspaceMeta = await models.workspaceMeta.getOrCreateByParentId(options.workspaceId);
-  const environmentId: string = workspaceMeta.activeEnvironmentId || 'n/a';
-  const environment: Environment | null = await models.environment.getById(environmentId || 'n/a');
+  // fallback to base environment
+  const activeEnvironmentId = workspaceMeta.activeEnvironmentId;
+  const activeEnvironment = activeEnvironmentId && await models.environment.getById(activeEnvironmentId);
+  const environment = activeEnvironment || await models.environment.getOrCreateForParentId(options.workspaceId);
+  invariant(environment, 'failed to find environment ' + activeEnvironmentId);
   const responseEnvironmentId = environment ? environment._id : null;
 
   const caCert = await models.caCertificate.findByParentId(options.workspaceId);
@@ -136,6 +139,9 @@ const openWebSocketConnection = async (
   const caCertificate = (caCertficatePath && (await fs.promises.readFile(caCertficatePath)).toString()) || tls.rootCertificates.join('\n');
 
   try {
+    if (!options.url) {
+      throw new Error('URL is required');
+    }
     const readyStateChannel = `webSocket.${request._id}.readyState`;
 
     const reduceArrayToLowerCaseKeyedDictionary = (acc: { [key: string]: string }, { name, value }: BaseWebSocketRequest['headers'][0]) =>
@@ -249,8 +255,8 @@ const openWebSocketConnection = async (
       };
 
       const settings = await models.settings.getOrCreate();
-      models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
-      models.requestMeta.updateOrCreateByParentId(request._id, { activeResponseId: null });
+      const res = await models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
+      models.requestMeta.updateOrCreateByParentId(request._id, { activeResponseId: res._id });
 
       if (request.settingStoreCookies) {
         const setCookieStrings: string[] = getSetCookieHeaders(responseHeaders).map(h => h.value);
@@ -293,8 +299,8 @@ const openWebSocketConnection = async (
         settingStoreCookies: request.settingStoreCookies,
       };
       const settings = await models.settings.getOrCreate();
-      models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
-      models.requestMeta.updateOrCreateByParentId(request._id, { activeResponseId: null });
+      const res = await models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
+      models.requestMeta.updateOrCreateByParentId(request._id, { activeResponseId: res._id });
       deleteRequestMaps(request._id, `Unexpected response ${incomingMessage.statusCode}`);
     });
 
@@ -308,7 +314,9 @@ const openWebSocketConnection = async (
 
       eventLogFileStreams.get(options.requestId)?.write(JSON.stringify(openEvent) + '\n');
       timelineFileStreams.get(options.requestId)?.write(JSON.stringify({ value: 'WebSocket connection established', name: 'Text', timestamp: Date.now() }) + '\n');
-      event.sender.send(readyStateChannel, ws.readyState);
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(readyStateChannel, ws.readyState === WebSocket.OPEN);
+      }
 
       if (options.initialPayload) {
         sendPayload(ws, { requestId: options.requestId, payload: options.initialPayload });
@@ -341,7 +349,9 @@ const openWebSocketConnection = async (
 
       const message = `Closing connection with code ${code}`;
       deleteRequestMaps(request._id, message, closeEvent);
-      event.sender.send(readyStateChannel, ws.readyState);
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(readyStateChannel, ws.readyState === WebSocket.OPEN);
+      }
     });
 
     ws.addEventListener('error', async ({ error, message }: ErrorEvent) => {
@@ -357,7 +367,9 @@ const openWebSocketConnection = async (
       };
 
       deleteRequestMaps(request._id, message, errorEvent);
-      event.sender.send(readyStateChannel, ws.readyState);
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(readyStateChannel, ws.readyState === WebSocket.OPEN);
+      }
       if (error.code) {
         createErrorResponse(responseId, request._id, responseEnvironmentId, timelinePath, message || 'Something went wrong');
       }
@@ -380,8 +392,8 @@ const createErrorResponse = async (responseId: string, requestId: string, enviro
     statusMessage: 'Error',
     error: message,
   };
-  models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
-  models.requestMeta.updateOrCreateByParentId(requestId, { activeResponseId: null });
+  const res = await models.webSocketResponse.create(responsePatch, settings.maxHistoryResponses);
+  models.requestMeta.updateOrCreateByParentId(requestId, { activeResponseId: res._id });
 };
 
 const deleteRequestMaps = async (requestId: string, message: string, event?: WebSocketCloseEvent | WebSocketErrorEvent) => {
@@ -398,8 +410,8 @@ const deleteRequestMaps = async (requestId: string, message: string, event?: Web
 
 const getWebSocketReadyState = async (
   options: { requestId: string }
-): Promise<WebSocketConnection['readyState']> => {
-  return WebSocketConnections.get(options.requestId)?.readyState ?? 0;
+): Promise<boolean> => {
+  return WebSocketConnections.get(options.requestId)?.readyState === WebSocket.OPEN;
 };
 
 const sendPayload = async (ws: WebSocket, options: { payload: string; requestId: string }): Promise<void> => {

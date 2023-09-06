@@ -1,9 +1,7 @@
-import { Call, ClientDuplexStream, ClientReadableStream, ServiceError, StatusObject } from '@grpc/grpc-js';
-import { credentials, makeGenericClientConstructor, Metadata, status } from '@grpc/grpc-js';
+import { Call, ClientDuplexStream, ClientReadableStream, credentials, makeGenericClientConstructor, Metadata, ServiceError, status, StatusObject } from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { AnyDefinition, EnumTypeDefinition, MessageTypeDefinition, PackageDefinition } from '@grpc/proto-loader';
-import electron, { ipcMain } from 'electron';
-import { IpcMainEvent } from 'electron';
+import { AnyDefinition, EnumTypeDefinition, MessageTypeDefinition, PackageDefinition, ServiceDefinition } from '@grpc/proto-loader';
+import electron, { ipcMain, IpcMainEvent } from 'electron';
 import * as grpcReflection from 'grpc-reflection-js';
 
 import type { RenderedGrpcRequest, RenderedGrpcRequestBody } from '../../common/render';
@@ -11,8 +9,8 @@ import * as models from '../../models';
 import type { GrpcRequest, GrpcRequestHeader } from '../../models/grpc-request';
 import { parseGrpcUrl } from '../../network/grpc/parse-grpc-url';
 import { writeProtoFile } from '../../network/grpc/write-proto-file';
-import { SegmentEvent, trackSegmentEvent } from '../../ui/analytics';
 import { invariant } from '../../utils/invariant';
+import { mockRequestMethods } from './automock';
 
 const grpcCalls = new Map<string, Call>();
 export interface GrpcIpcRequestParams {
@@ -75,6 +73,7 @@ interface MethodDefs {
   responseStream: boolean;
   requestSerialize: (value: any) => Buffer;
   responseDeserialize: (value: Buffer) => any;
+  example?: Record<string, any>;
 }
 const getMethodsFromReflection = async (host: string, metadata: GrpcRequestHeader[]): Promise<MethodDefs[]> => {
   try {
@@ -84,15 +83,29 @@ const getMethodsFromReflection = async (host: string, metadata: GrpcRequestHeade
       grpcOptions,
       filterDisabledMetaData(metadata)
     );
-    const services = await client.listServices() as string[];
+    const services = await client.listServices();
     const methodsPromises = services.map(async service => {
       const fileContainingSymbol = await client.fileContainingSymbol(service);
+      const fullService = fileContainingSymbol.lookupService(service);
+      const mockedRequestMethods = mockRequestMethods(fullService);
       const descriptorMessage = fileContainingSymbol.toDescriptor('proto3');
+      const packageDefinition = protoLoader.loadFileDescriptorSetFromObject(descriptorMessage, {});
       const tryToGetMethods = () => {
         try {
           console.log('[grpc] loading service from reflection:', service);
-          const packageDefinition = protoLoader.loadFileDescriptorSetFromObject(descriptorMessage, {});
-          return getMethodsFromPackageDefinition(packageDefinition);
+          const serviceDefinition = asServiceDefinition(packageDefinition[service]);
+          invariant(serviceDefinition, `'${service}' was not a valid ServiceDefinition`);
+          const serviceMethods = Object.values(serviceDefinition);
+          return serviceMethods.map(m => {
+            const methodName = Object.keys(mockedRequestMethods).find(name => m.path.endsWith(`/${name}`));
+            if (!methodName) {
+              return m;
+            }
+            return {
+              ...m,
+              example: mockedRequestMethods[methodName]().plain,
+            };
+          });
         } catch (e) {
           console.error(e);
           return [];
@@ -106,17 +119,19 @@ const getMethodsFromReflection = async (host: string, metadata: GrpcRequestHeade
     throw error;
   }
 };
-const loadMethodsFromReflection = async (options: { url: string; metadata: GrpcRequestHeader[] }): Promise<GrpcMethodInfo[]> => {
+export const loadMethodsFromReflection = async (options: { url: string; metadata: GrpcRequestHeader[] }): Promise<GrpcMethodInfo[]> => {
   invariant(options.url, 'gRPC request url not provided');
   const methods = await getMethodsFromReflection(options.url, options.metadata);
   return methods.map(method => ({
     type: getMethodType(method),
     fullPath: method.path,
+    example: method.example,
   }));
 };
 export interface GrpcMethodInfo {
   type: GrpcMethodType;
   fullPath: string;
+  example?: Record<string, any>;
 }
 export const getMethodType = ({ requestStream, responseStream }: any): GrpcMethodType => {
   if (requestStream && responseStream) {
@@ -146,8 +161,24 @@ export const getSelectedMethod = async (request: GrpcRequest): Promise<MethodDef
 };
 export const getMethodsFromPackageDefinition = (packageDefinition: PackageDefinition): MethodDefs[] => {
   return Object.values(packageDefinition)
-    .filter((obj: AnyDefinition): obj is EnumTypeDefinition | MessageTypeDefinition => !obj.format)
+    .filter(isServiceDefinition)
     .flatMap(Object.values);
+};
+
+const isServiceDefinition = (definition: AnyDefinition): definition is ServiceDefinition => {
+  return !!asServiceDefinition(definition);
+};
+const asServiceDefinition = (definition: AnyDefinition): ServiceDefinition | null => {
+  if (isMessageDefinition(definition) || isEnumDefinition(definition)) {
+    return null;
+  }
+  return definition;
+};
+const isMessageDefinition = (definition: AnyDefinition): definition is MessageTypeDefinition => {
+  return (definition as MessageTypeDefinition).format === 'Protocol Buffer 3 DescriptorProto';
+};
+const isEnumDefinition = (definition: AnyDefinition): definition is EnumTypeDefinition => {
+  return (definition as EnumTypeDefinition).format === 'Protocol Buffer 3 EnumDescriptorProto';
 };
 
 export const start = (
@@ -224,8 +255,6 @@ export const start = (
       }
       // Update request stats
       models.stats.incrementExecutedRequests();
-      trackSegmentEvent(SegmentEvent.requestExecute);
-
       event.reply('grpc.start', request._id);
 
     } catch (error) {
@@ -320,4 +349,8 @@ const filterDisabledMetaData = (metadata: GrpcRequestHeader[],): Metadata => {
 export type GrpcMethodType = 'unary' | 'server' | 'client' | 'bidi';
 const closeAll = (): void => grpcCalls.forEach(x => x.cancel());
 
-electron.app.on('window-all-closed', closeAll);
+if (typeof electron.app.on === 'function') {
+  electron.app.on('window-all-closed', closeAll);
+} else {
+  console.warn('electron.app.on is not a function. Are you running a test?');
+}

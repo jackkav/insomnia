@@ -1,15 +1,14 @@
 import React, { FC, forwardRef, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 import styled from 'styled-components';
 
 import { COLLAPSE_SIDEBAR_REMS, DEFAULT_PANE_HEIGHT, DEFAULT_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, MAX_PANE_HEIGHT, MAX_PANE_WIDTH, MAX_SIDEBAR_REMS, MIN_PANE_HEIGHT, MIN_PANE_WIDTH, MIN_SIDEBAR_REMS } from '../../common/constants';
 import { debounce } from '../../common/misc';
 import * as models from '../../models';
-import { selectActiveWorkspaceMeta, selectSettings } from '../redux/selectors';
-import { selectPaneHeight, selectPaneWidth, selectSidebarWidth } from '../redux/sidebar-selectors';
+import { RootLoaderData } from '../routes/root';
+import { WorkspaceLoaderData } from '../routes/workspace';
 import { ErrorBoundary } from './error-boundary';
 import { Sidebar } from './sidebar/sidebar';
-
 const verticalStyles = {
   '.sidebar': {
     gridColumnStart: '2',
@@ -187,23 +186,30 @@ const Pane = forwardRef<HTMLElement, { position: string; children: ReactNode }>(
   }
 );
 
+export const SidebarFooter = styled.div({
+  gridRowStart: 6,
+});
+
 interface Props {
   renderPageSidebar?: ReactNode;
   renderPaneOne?: ReactNode;
   renderPaneTwo?: ReactNode;
+  className?: string;
 }
 
 export const SidebarLayout: FC<Props> = ({
   renderPaneOne,
   renderPaneTwo,
   renderPageSidebar,
+  className,
 }) => {
-  const { forceVerticalLayout } = useSelector(selectSettings);
-  const activeWorkspaceMeta = useSelector(selectActiveWorkspaceMeta);
-  const reduxPaneHeight = useSelector(selectPaneHeight);
-  const reduxPaneWidth = useSelector(selectPaneWidth);
-  const reduxSidebarWidth = useSelector(selectSidebarWidth);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const { forceVerticalLayout } = settings;
 
+  const workspaceData = useRouteLoaderData(':workspaceId') as WorkspaceLoaderData | undefined;
+  const { activeWorkspaceMeta } = workspaceData || {};
   const requestPaneRef = useRef<HTMLElement>(null);
   const responsePaneRef = useRef<HTMLElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -211,9 +217,9 @@ export const SidebarLayout: FC<Props> = ({
   const [draggingSidebar, setDraggingSidebar] = useState(false);
   const [draggingPaneHorizontal, setDraggingPaneHorizontal] = useState(false);
   const [draggingPaneVertical, setDraggingPaneVertical] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(reduxSidebarWidth || DEFAULT_SIDEBAR_WIDTH);
-  const [paneWidth, setPaneWidth] = useState(reduxPaneWidth || DEFAULT_PANE_WIDTH);
-  const [paneHeight, setPaneHeight] = useState(reduxPaneHeight || DEFAULT_PANE_HEIGHT);
+  const [sidebarWidth, setSidebarWidth] = useState(activeWorkspaceMeta?.sidebarWidth || DEFAULT_SIDEBAR_WIDTH);
+  const [paneWidth, setPaneWidth] = useState(activeWorkspaceMeta?.paneWidth || DEFAULT_PANE_WIDTH);
+  const [paneHeight, setPaneHeight] = useState(activeWorkspaceMeta?.paneHeight || DEFAULT_PANE_HEIGHT);
 
   useEffect(() => {
     const unsubscribe = window.main.on('toggle-sidebar', () => {
@@ -261,7 +267,7 @@ export const SidebarLayout: FC<Props> = ({
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (draggingPaneHorizontal) {
       // Only pop the overlay after we've moved it a bit (so we don't block doubleclick);
-      const distance = reduxPaneWidth - paneWidth;
+      const distance = (activeWorkspaceMeta?.paneWidth || DEFAULT_PANE_WIDTH) - paneWidth;
 
       if (!showDragOverlay && Math.abs(distance) > 0.02) {
         setShowDragOverlay(true);
@@ -279,7 +285,7 @@ export const SidebarLayout: FC<Props> = ({
       }
     } else if (draggingPaneVertical) {
       // Only pop the overlay after we've moved it a bit (so we don't block doubleclick);
-      const distance = reduxPaneHeight - paneHeight;
+      const distance = (activeWorkspaceMeta?.paneHeight || DEFAULT_PANE_HEIGHT) - paneHeight;
       /* % */
       if (!showDragOverlay && Math.abs(distance) > 0.02) {
         setShowDragOverlay(true);
@@ -296,7 +302,7 @@ export const SidebarLayout: FC<Props> = ({
       }
     } else if (draggingSidebar) {
       // Only pop the overlay after we've moved it a bit (so we don't block doubleclick);
-      const distance = reduxSidebarWidth - sidebarWidth;
+      const distance = (activeWorkspaceMeta?.sidebarWidth || DEFAULT_SIDEBAR_WIDTH) - sidebarWidth;
       /* ems */
       if (!showDragOverlay && Math.abs(distance) > 2) {
         setShowDragOverlay(true);
@@ -313,7 +319,7 @@ export const SidebarLayout: FC<Props> = ({
         handleSetSidebarWidth(localSidebarWidth);
       }
     }
-  }, [draggingPaneHorizontal, draggingPaneVertical, draggingSidebar, handleSetPaneHeight, handleSetPaneWidth, handleSetSidebarWidth, paneHeight, paneWidth, reduxPaneHeight, reduxPaneWidth, reduxSidebarWidth, showDragOverlay, sidebarWidth]);
+  }, [activeWorkspaceMeta?.paneHeight, activeWorkspaceMeta?.paneWidth, activeWorkspaceMeta?.sidebarWidth, draggingPaneHorizontal, draggingPaneVertical, draggingSidebar, handleSetPaneHeight, handleSetPaneWidth, handleSetSidebarWidth, paneHeight, paneWidth, showDragOverlay, sidebarWidth]);
 
   useEffect(() => {
     document.addEventListener('mouseup', handleMouseUp);
@@ -365,6 +371,7 @@ export const SidebarLayout: FC<Props> = ({
     <LayoutGrid
       key="wrapper"
       id="wrapper"
+      className={className}
       orientation={forceVerticalLayout ? 'vertical' : 'horizontal'}
       style={{
         gridTemplateColumns: gridColumns,

@@ -132,6 +132,7 @@ const UnitTestItemView = ({
       }
     >
       <CodeEditor
+        id="unit-test-editor"
         ref={editorRef}
         dynamicHeight
         showPrettifyButton
@@ -221,7 +222,7 @@ export const indexLoader: LoaderFunction = async ({ params }) => {
       `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/test/test-suite/${unitTestSuites[0]._id}`
     );
   }
-  return;
+  return null;
 };
 
 interface LoaderData {

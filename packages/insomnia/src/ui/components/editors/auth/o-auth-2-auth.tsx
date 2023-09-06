@@ -1,6 +1,7 @@
 import React, { ChangeEvent, FC, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useRouteLoaderData } from 'react-router-dom';
 
-import { convertEpochToMilliseconds, toKebabCase } from '../../../../common/misc';
+import { toKebabCase } from '../../../../common/misc';
 import accessTokenUrls from '../../../../datasets/access-token-urls';
 import authorizationUrls from '../../../../datasets/authorization-urls';
 import * as models from '../../../../models';
@@ -15,9 +16,9 @@ import {
   PKCE_CHALLENGE_S256,
 } from '../../../../network/o-auth-2/constants';
 import { getOAuth2Token } from '../../../../network/o-auth-2/get-token';
-import { initNewOAuthSession } from '../../../../network/o-auth-2/misc';
+import { initNewOAuthSession } from '../../../../network/o-auth-2/get-token';
 import { useNunjucks } from '../../../context/nunjucks/use-nunjucks';
-import { useActiveRequest } from '../../../hooks/use-active-request';
+import { RequestLoaderData } from '../../../routes/request';
 import { Link } from '../../base/link';
 import { showModal } from '../../modals';
 import { ResponseDebugModal } from '../../modals/response-debug-modal';
@@ -28,7 +29,6 @@ import { AuthInputRow } from './components/auth-input-row';
 import { AuthSelectRow } from './components/auth-select-row';
 import { AuthTableBody } from './components/auth-table-body';
 import { AuthToggleRow } from './components/auth-toggle-row';
-
 const getAuthorizationUrls = () => authorizationUrls;
 const getAccessTokenUrls = () => accessTokenUrls;
 
@@ -244,7 +244,8 @@ const getFieldsForGrantType = (authentication: Request['authentication']) => {
 };
 
 export const OAuth2Auth: FC = () => {
-  const { activeRequest: { authentication } } = useActiveRequest();
+  const { activeRequest: { authentication } } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
+
   const { basic, advanced } = getFieldsForGrantType(authentication);
 
   return (
@@ -279,7 +280,14 @@ export const OAuth2Auth: FC = () => {
     </>
   );
 };
-
+/**
+  Finds epoch's digit count and converts it to make it exactly 13 digits.
+  Which is the epoch millisecond representation. (trims last 2 digits)
+*/
+export function convertEpochToMilliseconds(epoch: number) {
+  const expDigitCount = epoch.toString().length;
+  return parseInt(String(epoch * 10 ** (13 - expDigitCount)), 10);
+}
 const renderIdentityTokenExpiry = (token?: Pick<OAuth2Token, 'identityToken'>) => {
   if (!token || !token.identityToken) {
     return;
@@ -330,7 +338,7 @@ const renderAccessTokenExpiry = (token?: Pick<OAuth2Token, 'accessToken' | 'expi
 };
 
 const OAuth2TokenInput: FC<{ token: OAuth2Token | null; label: string; property: keyof Pick<OAuth2Token, 'accessToken' | 'refreshToken' | 'identityToken'> }> = ({ token, label, property }) => {
-  const { activeRequest } = useActiveRequest();
+  const { activeRequest } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
 
   const onChange = async ({ currentTarget: { value } }: ChangeEvent<HTMLInputElement>) => {
     if (token) {
@@ -413,7 +421,7 @@ const OAuth2Error: FC<{ token: OAuth2Token | null }> = ({ token }) => {
 };
 
 const OAuth2Tokens: FC = () => {
-  const { activeRequest: { authentication, _id: requestId } } = useActiveRequest();
+  const { activeRequest: { authentication, _id: requestId } } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
   const [token, setToken] = useState<OAuth2Token | null>(null);
   useEffect(() => {
     const fn = async () => {

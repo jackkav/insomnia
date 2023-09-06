@@ -24,24 +24,23 @@ import {
   CodeEditorHandle,
 } from '../components/codemirror/code-editor';
 import { DesignEmptyState } from '../components/design-empty-state';
+import { WorkspaceSyncDropdown } from '../components/dropdowns/workspace-sync-dropdown';
 import { ErrorBoundary } from '../components/error-boundary';
 import { Notice, NoticeTable } from '../components/notice-table';
 import { SidebarLayout } from '../components/sidebar-layout';
 import { SpecEditorSidebar } from '../components/spec-editor/spec-editor-sidebar';
 import { Tooltip } from '../components/tooltip';
-import { superFaint } from '../css/css-in-js';
 import {
   useActiveApiSpecSyncVCSVersion,
   useGitVCSVersion,
 } from '../hooks/use-vcs-version';
-
 const EmptySpaceHelper = styled.div({
-  ...superFaint,
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
   padding: '2em',
   textAlign: 'center',
+  opacity: 'calc(var(--opacity-subtle) * 0.8)',
 });
 
 export const Toolbar = styled.div({
@@ -256,9 +255,25 @@ const Design: FC = () => {
               apiSpec={apiSpec}
               handleSetSelection={handleScrollToSelection}
             />
+            <div
+              style={{
+                gridRowStart: 6,
+              }}
+            >
+              <WorkspaceSyncDropdown />
+            </div>
           </ErrorBoundary>
         ) : (
-          <EmptySpaceHelper>A spec navigator will render here</EmptySpaceHelper>
+          <Fragment>
+            <EmptySpaceHelper>A spec navigator will render here</EmptySpaceHelper>
+            <div
+              style={{
+                gridRowStart: 6,
+              }}
+            >
+              <WorkspaceSyncDropdown />
+            </div>
+          </Fragment>
         )
       }
       renderPaneTwo={showRightPane && <SwaggerUIDiv text={apiSpec.contents} />}
@@ -267,6 +282,7 @@ const Design: FC = () => {
           <div className="column tall theme--pane__body">
             <div className="tall relative overflow-hidden">
               <CodeEditor
+                id="spec-editor"
                 key={uniquenessKey}
                 showPrettifyButton
                 ref={editor}

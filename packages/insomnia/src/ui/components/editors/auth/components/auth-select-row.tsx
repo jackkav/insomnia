@@ -1,7 +1,9 @@
 import React, { ChangeEvent, FC, ReactNode, useCallback } from 'react';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import { toKebabCase } from '../../../../../common/misc';
-import { useActiveRequest } from '../../../../hooks/use-active-request';
+import { useRequestPatcher } from '../../../../hooks/use-request';
+import { RequestLoaderData } from '../../../../routes/request';
 import { AuthRow } from './auth-row';
 
 interface Props {
@@ -16,7 +18,8 @@ interface Props {
 }
 
 export const AuthSelectRow: FC<Props> = ({ label, property, help, options, disabled }) => {
-  const { activeRequest: { authentication }, patchAuth } = useActiveRequest();
+  const { activeRequest: { authentication, _id: requestId } } = useRouteLoaderData('request/:requestId') as RequestLoaderData;
+  const patchRequest = useRequestPatcher();
 
   const selectedValue = authentication.hasOwnProperty(property) ? authentication[property] : options[0].value;
 
@@ -26,8 +29,8 @@ export const AuthSelectRow: FC<Props> = ({ label, property, help, options, disab
     if (updatedValue === 'true' || updatedValue === 'false') {
       updatedValue = JSON.parse(updatedValue);
     }
-    patchAuth({ [property]: updatedValue });
-  }, [patchAuth, property]);
+    patchRequest(requestId, { authentication: { ...authentication, [property]: updatedValue } });
+  }, [authentication, patchRequest, property, requestId]);
 
   const id = toKebabCase(label);
 

@@ -1,25 +1,25 @@
 import { ImportRequest } from './entities';
-import { importers } from './importers';
 import { setDefaults } from './utils';
 
-export interface ConvertResultType {
+export interface InsomniaImporter {
   id: string;
   name: string;
   description: string;
 }
 
-export interface ConvertResult<T = {}> {
-  type: ConvertResultType;
+export interface ConvertResult {
+  type: InsomniaImporter;
   data: {
     _type: 'export';
     __export_format: 4;
     __export_date: string;
     __export_source: `insomnia.importers:v${string}`;
-    resources: ImportRequest<T>[];
+    resources: ImportRequest[];
   };
 }
 
 export const convert = async (rawData: string) => {
+  const importers = (await import('./importers')).importers;
   for (const importer of importers) {
     const resources = await importer.convert(rawData);
 
@@ -31,7 +31,7 @@ export const convert = async (rawData: string) => {
       resources[0].environment = resources[0].variable;
     }
 
-    const convertedResult: ConvertResult = {
+    const convertedResult = {
       type: {
         id: importer.id,
         name: importer.name,

@@ -1,5 +1,5 @@
 import React, { FC } from 'react';
-import { useSelector } from 'react-redux';
+import { useRouteLoaderData } from 'react-router-dom';
 
 import {
   areSameKeyCombinations,
@@ -9,8 +9,8 @@ import {
   newDefaultRegistry,
 } from '../../../common/hotkeys';
 import { HotKeyRegistry, KeyboardShortcut, KeyCombination } from '../../../common/settings';
-import * as models from '../../../models/index';
-import { selectHotKeyRegistry, selectSettings } from '../../redux/selectors';
+import { useSettingsPatcher } from '../../hooks/use-request';
+import { RootLoaderData } from '../../routes/root';
 import { Dropdown, DropdownButton, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
 import { PromptButton } from '../base/prompt-button';
 import { Hotkey } from '../hotkey';
@@ -23,14 +23,17 @@ export const isKeyCombinationInRegistry = (pressedKeyComb: KeyCombination, hotKe
       .find(keyComb => areSameKeyCombinations(pressedKeyComb, keyComb)));
 
 export const Shortcuts: FC = () => {
-  const hotKeyRegistry = useSelector(selectHotKeyRegistry);
-  const settings = useSelector(selectSettings);
+  const {
+    settings,
+  } = useRouteLoaderData('root') as RootLoaderData;
+  const { hotKeyRegistry } = settings;
+  const patchSettings = useSettingsPatcher();
 
   return (
     <div className="shortcuts">
       <div className="row-spaced margin-bottom-xs">
         <div>
-          <PromptButton className="btn btn--clicky" onClick={() => models.settings.update(settings, { hotKeyRegistry: newDefaultRegistry() })}>
+          <PromptButton className="btn btn--clicky" onClick={() => patchSettings({ hotKeyRegistry: newDefaultRegistry() })}>
             Reset all
           </PromptButton>
         </div>
@@ -82,7 +85,7 @@ export const Shortcuts: FC = () => {
                               addKeyCombination: (keyboardShortcut: KeyboardShortcut, keyComb: KeyCombination) => {
                                 const keyCombs = getPlatformKeyCombinations(hotKeyRegistry[keyboardShortcut]);
                                 keyCombs.push(keyComb);
-                                models.settings.update(settings, { hotKeyRegistry });
+                                patchSettings({ hotKeyRegistry });
                               },
                             }
                           )}
@@ -114,7 +117,7 @@ export const Shortcuts: FC = () => {
                                   });
                                   if (toBeRemovedIndex >= 0) {
                                     keyCombosForThisPlatform.splice(toBeRemovedIndex, 1);
-                                    models.settings.update(settings, { hotKeyRegistry });
+                                    patchSettings({ hotKeyRegistry });
                                   }
                                 }}
                               />
@@ -132,7 +135,7 @@ export const Shortcuts: FC = () => {
                           withPrompt
                           onClick={() => {
                             hotKeyRegistry[keyboardShortcut] = newDefaultRegistry()[keyboardShortcut];
-                            models.settings.update(settings, { hotKeyRegistry });
+                            patchSettings({ hotKeyRegistry });
                           }}
                         />
                       </DropdownItem>

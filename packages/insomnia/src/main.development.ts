@@ -1,18 +1,19 @@
+
 import electron, { app, ipcMain, session } from 'electron';
 import { BrowserWindow } from 'electron';
 import contextMenu from 'electron-context-menu';
-import installExtension, { REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from 'electron-devtools-installer';
+import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer';
 import path from 'path';
 
-import appConfig from '../config/config.json';
+import { userDataFolder } from '../config/config.json';
 import { changelogUrl, getAppVersion, isDevelopment, isMac } from './common/constants';
 import { database } from './common/database';
-import { disableSpellcheckerDownload } from './common/electron-helpers';
 import log, { initializeLogging } from './common/log';
-import { validateInsomniaConfig } from './common/validate-insomnia-config';
+import { backupIfNewerVersionAvailable } from './main/backup';
 import { registerElectronHandlers } from './main/ipc/electron';
 import { registergRPCHandlers } from './main/ipc/grpc';
 import { registerMainHandlers } from './main/ipc/main';
+import { registerCurlHandlers } from './main/network/curl';
 import { registerWebSocketHandlers } from './main/network/websocket';
 import { initializeSentry, sentryWatchAnalyticsEnabled } from './main/sentry';
 import { checkIfRestartNeeded } from './main/squirrel-startup';
@@ -40,7 +41,7 @@ if (envDataPath) {
 } else {
   // Explicitly set userData folder from config because it's sketchy to rely on electron-builder to use productName, which could be changed by accident.
   const defaultPath = app.getPath('userData');
-  const newPath = path.join(defaultPath, '../', isDevelopment() ? 'insomnia-app' : appConfig.userDataFolder);
+  const newPath = path.join(defaultPath, '../', isDevelopment() ? 'insomnia-app' : userDataFolder);
   app.setPath('userData', newPath);
 }
 
@@ -58,25 +59,28 @@ app.on('web-contents-created', (_, contents) => {
 
 // When the app is first launched
 app.on('ready', async () => {
-
-  const { error } = validateInsomniaConfig();
-
-  if (error) {
-    electron.dialog.showErrorBox(error.title, error.message);
-    console.log('[config] Insomnia config is invalid, preventing app initialization');
-    app.exit(1);
-    return;
-  }
   registerElectronHandlers();
   registerMainHandlers();
   registergRPCHandlers();
   registerWebSocketHandlers();
+  registerCurlHandlers();
 
+  /**
+ * There's no option that prevents Electron from fetching spellcheck dictionaries from Chromium's CDN and passing a non-resolving URL is the only known way to prevent it from fetching.
+ * see: https://github.com/electron/electron/issues/22995
+ * On macOS the OS spellchecker is used and therefore we do not download any dictionary files.
+ * This API is a no-op on macOS.
+ */
+  const disableSpellcheckerDownload = () => {
+    electron.session.defaultSession.setSpellCheckerDictionaryDownloadURL(
+      'https://00.00/'
+    );
+  };
   disableSpellcheckerDownload();
 
   if (isDevelopment()) {
     try {
-      const extensions = [REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS];
+      const extensions = [REACT_DEVELOPER_TOOLS];
       const extensionsPlural = extensions.length > 0 ? 's' : '';
       const names = await Promise.all(extensions.map(extension => installExtension(extension)));
       console.log(`[electron-extensions] Added DevTools Extension${extensionsPlural}: ${names.join(', ')}`);
@@ -145,10 +149,11 @@ const _launchApp = async () => {
   await _trackStats();
   let window: BrowserWindow;
   // Handle URLs sent via command line args
-  ipcMain.once('window-ready', () => {
+  ipcMain.once('halfSecondAfterAppStart', () => {
     console.log('[main] Window ready, handling command line arguments', process.argv);
     const args = process.argv.slice(1).filter(a => a !== '.');
     if (args.length) {
+      window = windowUtils.getOrCreateWindow();
       window.webContents.send('shell:open', args.join());
     }
   });
@@ -163,6 +168,7 @@ const _launchApp = async () => {
       // Called when second instance launched with args (Windows/Linux)
       app.on('second-instance', (_1, args) => {
         console.log('Second instance listener received:', args.join('||'));
+        window = windowUtils.getOrCreateWindow();
         if (window) {
           if (window.isMinimized()) {
             window.restore();
@@ -173,15 +179,24 @@ const _launchApp = async () => {
         console.log('[main] Open Deep Link URL sent from second instance', lastArg);
         window.webContents.send('shell:open', lastArg);
       });
-      window = windowUtils.createWindow();
+      window = windowUtils.getOrCreateWindow();
 
       app.on('open-url', (_event, url) => {
         console.log('[main] Open Deep Link URL', url);
+        window = windowUtils.getOrCreateWindow();
+        if (window) {
+          if (window.isMinimized()) {
+            window.restore();
+          }
+          window.focus();
+        } else {
+          window = windowUtils.getOrCreateWindow();
+        }
         window.webContents.send('shell:open', url);
       });
     }
   } else {
-    window = windowUtils.createWindow();
+    window = windowUtils.getOrCreateWindow();
   }
 
   // Don't send origin header from Insomnia because we're not technically using CORS
@@ -215,7 +230,8 @@ async function _trackStats() {
     launches: oldStats.launches + 1,
   });
 
-  ipcMain.once('window-ready', () => {
+  ipcMain.once('halfSecondAfterAppStart', async () => {
+    backupIfNewerVersionAvailable();
     const { currentVersion, launches, lastVersion } = stats;
 
     const firstLaunch = launches === 1;
@@ -223,7 +239,7 @@ async function _trackStats() {
     if (!justUpdated || !currentVersion) {
       return;
     }
-
+    console.log('[main] App update detected', currentVersion, lastVersion);
     const notification: ToastNotification = {
       key: `updated-${currentVersion}`,
       url: changelogUrl(),
@@ -231,7 +247,7 @@ async function _trackStats() {
       message: `Updated to ${currentVersion}`,
     };
     // Wait a bit before showing the user because the app just launched.
-    setTimeout(() => {
+    setTimeout(async () => {
       for (const window of BrowserWindow.getAllWindows()) {
         // @ts-expect-error -- TSCONVERSION likely needs to be window.webContents.send instead
         window.send('show-notification', notification);
