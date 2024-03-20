@@ -153,7 +153,6 @@ const _launchApp = async () => {
     const args = process.argv.slice(1).filter(a => a !== '.');
     if (args.length) {
       window = windowUtils.getOrCreateWindow();
-      windowUtils.createHiddenBrowserWindow();
       window.webContents.send('shell:open', args.join());
     }
   });
@@ -198,6 +197,7 @@ const _launchApp = async () => {
   } else {
     window = windowUtils.getOrCreateWindow();
   }
+  windowUtils.createHiddenBrowserWindow();
 
   // Don't send origin header from Insomnia because we're not technically using CORS
   session.defaultSession.webRequest.onBeforeSendHeaders((details, fn) => {
