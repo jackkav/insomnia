@@ -1,9 +1,9 @@
-import { database as db } from '../common/database';
-import * as models from '../models/index';
+// import { database as db } from '../common/database';
+// import * as models from '../models/index';
 import type { Request } from '../models/request';
 import type { RequestGroup } from '../models/request-group';
 import type { Workspace } from '../models/workspace';
-import * as pluginContexts from '../plugins/context';
+// import * as pluginContexts from '../plugins/context';
 import type { PluginTemplateTag } from './extensions';
 import * as templating from './index';
 import { decodeEncoding } from './utils';
@@ -106,10 +106,10 @@ export default class BaseExtension {
       .map(decodeEncoding);
     // Define a helper context with utils
     const helperContext: HelperContext = {
-      ...pluginContexts.app.init(renderPurpose),
+      // ...pluginContexts.app.init(renderPurpose),
       // @ts-expect-error -- TSCONVERSION
-      ...pluginContexts.store.init(this._plugin),
-      ...pluginContexts.network.init(),
+      // ...pluginContexts.store.init(this._plugin),
+      // ...pluginContexts.network.init(),
       context: renderContext,
       meta: renderMeta,
       renderPurpose,
@@ -118,33 +118,33 @@ export default class BaseExtension {
           templating.render(str, {
             context: renderContext,
           }),
-        models: {
-          request: {
-            getById: models.request.getById,
-            getAncestors: async (request: any) => {
-              const ancestors = await db.withAncestors<Request | RequestGroup | Workspace>(request, [
-                models.requestGroup.type,
-                models.workspace.type,
-              ]);
-              return ancestors.filter(doc => doc._id !== request._id);
-            },
-          },
-          workspace: {
-            getById: models.workspace.getById,
-          },
-          oAuth2Token: {
-            getByRequestId: models.oAuth2Token.getByParentId,
-          },
-          cookieJar: {
-            getOrCreateForWorkspace: (workspace: any) => {
-              return models.cookieJar.getOrCreateForParentId(workspace._id);
-            },
-          },
-          response: {
-            getLatestForRequestId: models.response.getLatestForRequest,
-            getBodyBuffer: models.response.getBodyBuffer,
-          },
-        },
+        // models: {
+        //   request: {
+        //     getById: models.request.getById,
+        //     getAncestors: async (request: any) => {
+        //       const ancestors = await db.withAncestors<Request | RequestGroup | Workspace>(request, [
+        //         models.requestGroup.type,
+        //         models.workspace.type,
+        //       ]);
+        //       return ancestors.filter(doc => doc._id !== request._id);
+        //     },
+        //   },
+        //   workspace: {
+        //     getById: models.workspace.getById,
+        //   },
+        //   oAuth2Token: {
+        //     getByRequestId: models.oAuth2Token.getByParentId,
+        //   },
+        //   cookieJar: {
+        //     getOrCreateForWorkspace: (workspace: any) => {
+        //       return models.cookieJar.getOrCreateForParentId(workspace._id);
+        //     },
+        //   },
+        //   response: {
+        //     getLatestForRequestId: models.response.getLatestForRequest,
+        //     getBodyBuffer: models.response.getBodyBuffer,
+        //   },
+        // },
       },
     };
     let result;

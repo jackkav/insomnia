@@ -3,7 +3,7 @@ import nunjucks from 'nunjucks/browser/nunjucks';
 
 // import * as plugins from '../plugins/index';
 import { localTemplateTags } from '../ui/components/templating/local-template-tags';
-// import BaseExtension from './base-extension';
+import BaseExtension from './base-extension';
 // import { type NunjucksParsedTag } from './utils';
 
 export enum RenderErrorSubType {
@@ -226,7 +226,7 @@ async function getNunjucks(renderMode: string, ignoreUndefinedEnvVariable?: bool
   // const pluginTemplateTags = await plugins.getTemplateTags();
 
   const allExtensions = [
-    // ...localTemplateTags
+    ...localTemplateTags,
   ];
 
   for (const extension of allExtensions) {

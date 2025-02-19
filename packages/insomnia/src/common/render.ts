@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/electron/renderer';
 import clone from 'clone';
 import orderedJSON from 'json-order';
 
