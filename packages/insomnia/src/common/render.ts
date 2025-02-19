@@ -13,6 +13,7 @@ import type { WebSocketRequest } from '../models/websocket-request';
 import { isWorkspace, type Workspace } from '../models/workspace';
 import * as templating from '../templating';
 import * as templatingUtils from '../templating/utils';
+import { renderInWorker } from '../ui/worker/nunjucks';
 import { setDefaultProtocol } from '../utils/url/protocol';
 import { CONTENT_TYPE_GRAPHQL, JSON_ORDER_SEPARATOR } from './constants';
 import { database as db } from './database';
@@ -250,7 +251,9 @@ export async function buildRenderContext(
 
   return finalRenderContext;
 }
-
+const renderInThisProcess = async (input: { input: string; context: Record<string, any>; path: string; ignoreUndefinedEnvVariable: boolean }) => {
+  return templating.render(input.input, { context: input.context, path: input.path, ignoreUndefinedEnvVariable: input.ignoreUndefinedEnvVariable });
+};
 /**
  * Recursively render any JS object and return a new one
  * @param {*} obj - object to render
@@ -293,23 +296,37 @@ export async function render<T>(
       // Do nothing to these types
     } else if (typeof x === 'string') {
       // Detect if the string contains a require statement
-      if (/require\s*\(/ig.test(x)) {
-        console.warn('Short-circuiting `render`; string contains possible "require" invocation:', x);
-        Sentry.captureException(new Error(`Short-circuiting 'render'; string contains possible "require" invocation: ${x}`));
+      // if (/require\s*\(/ig.test(x)) {
+      //   console.warn('Short-circuiting `render`; string contains possible "require" invocation:', x);
+      //   Sentry.captureException(new Error(`Short-circuiting 'render'; string contains possible "require" invocation: ${x}`));
+      //   return x;
+      // }
+      const hasNunjucksInterpolationSymbols = x.includes('{{') && x.includes('}}');
+      const hasNunjucksCustomTagSymbols = x.includes('{%') && x.includes('%}');
+      const hasNunjucksCommentSymbols = x.includes('{#') && x.includes('#}');
+      if (!hasNunjucksInterpolationSymbols && !hasNunjucksCustomTagSymbols && !hasNunjucksCommentSymbols) {
+        return x;
+      }
+      if (x === '') {
         return x;
       }
 
       try {
+        // console.log(await renderInWorker({ input: x, context, path, ignoreUndefinedEnvVariable }));
+        const renderFork = process.type === 'renderer'
+          ? renderInWorker
+          : renderInThisProcess;
         // @ts-expect-error -- TSCONVERSION
-        x = await templating.render(x, { context, path, ignoreUndefinedEnvVariable });
-
+        x = await renderFork({ input: x, context, path, ignoreUndefinedEnvVariable });
+        // x = await templating.render(x, { context, path, ignoreUndefinedEnvVariable });
+        console.log('Rendered', x);
         // If the variable outputs a tag, render it again. This is a common use
         // case for environment variables:
         //   {{ foo }} => {% uuid 'v4' %} => dd265685-16a3-4d76-a59c-e8264c16835a
         // @ts-expect-error -- TSCONVERSION
         if (x.includes('{%')) {
           // @ts-expect-error -- TSCONVERSION
-          x = await templating.render(x, { context, path });
+          x = await renderFork({ input: x, context, path, ignoreUndefinedEnvVariable });
         }
       } catch (err) {
         console.log(`Failed to render element ${path}`, x);

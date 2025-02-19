@@ -1,10 +1,10 @@
-import { Environment } from 'nunjucks';
+import type { Environment } from 'nunjucks';
 import nunjucks from 'nunjucks/browser/nunjucks';
 
-import * as plugins from '../plugins/index';
+// import * as plugins from '../plugins/index';
 import { localTemplateTags } from '../ui/components/templating/local-template-tags';
-import BaseExtension from './base-extension';
-import { extractUndefinedVariableKey, type NunjucksParsedTag } from './utils';
+// import BaseExtension from './base-extension';
+// import { type NunjucksParsedTag } from './utils';
 
 export enum RenderErrorSubType {
   EnvironmentVariable = 'environmentVariable'
@@ -37,14 +37,38 @@ export const RENDER_TAGS = 'tags';
 export const NUNJUCKS_TEMPLATE_GLOBAL_PROPERTY_NAME = '_';
 
 type NunjucksEnvironment = Environment & {
-  extensions: Record<string, BaseExtension>;
+  extensions: Record<string, any>;
 };
 
 // Cached globals
 let nunjucksVariablesOnly: NunjucksEnvironment | null = null;
 let nunjucksTagsOnly: NunjucksEnvironment | null = null;
 let nunjucksAll: NunjucksEnvironment | null = null;
+export function _get(object: any, path: string | string[], defval = null) {
+  if (typeof path === 'string') {
+    path = path.split('.');
+  }
+  return path.reduce((xs, x) => (xs && xs[x] ? xs[x] : defval), object);
+}
+// because nunjucks only report the first error, we need to extract all missing variables that are not present in the context
+// for example, if the text is `{{ a }} {{ b }}`, nunjucks only report `a` is missing, but we need to report both `a` and `b`
+export function extractUndefinedVariableKey(text: string = '', templatingContext: Record<string, any>): string[] {
+  const regexVariable = /{{\s*([^ }]+)\s*}}/g;
+  const missingVariables: string[] = [];
+  let match;
 
+  while ((match = regexVariable.exec(text)) !== null) {
+    let variable = match[1];
+    if (variable.includes('_.')) {
+      variable = variable.split('_.')[1];
+    }
+    // Check if the variable is not present in the context
+    if (_get(templatingContext, variable) === undefined) {
+      missingVariables.push(variable);
+    }
+  }
+  return missingVariables;
+}
 /**
  * Render text based on stuff
  * @param {String} text - Nunjucks template in text form
@@ -137,7 +161,7 @@ export async function getTagDefinitions() {
     .map(k => env.extensions[k])
     .filter(ext => !ext.isDeprecated())
     .sort((a, b) => (a.getPriority() > b.getPriority() ? 1 : -1))
-    .map<NunjucksParsedTag>(ext => ({
+    .map(ext => ({
       name: ext.getTag() || '',
       displayName: ext.getName() || '',
       liveDisplayName: ext.getLiveDisplayName(),
@@ -199,9 +223,11 @@ async function getNunjucks(renderMode: string, ignoreUndefinedEnvVariable?: bool
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   const nunjucksEnvironment = nunjucks.configure(config) as NunjucksEnvironment;
 
-  const pluginTemplateTags = await plugins.getTemplateTags();
+  // const pluginTemplateTags = await plugins.getTemplateTags();
 
-  const allExtensions = [...pluginTemplateTags, ...localTemplateTags];
+  const allExtensions = [
+    // ...localTemplateTags
+  ];
 
   for (const extension of allExtensions) {
     const { templateTag, plugin } = extension;

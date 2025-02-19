@@ -1,5 +1,4 @@
 import type { EditorFromTextArea, MarkerRange } from 'codemirror';
-import _ from 'lodash';
 
 import type { DisplayName, PluginArgumentEnumOption, PluginTemplateTagActionContext } from './extensions';
 import objectPath from './third_party/objectPath';
@@ -281,24 +280,40 @@ export function decodeEncoding<T>(value: T) {
   return value;
 }
 
-// because nunjucks only report the first error, we need to extract all missing variables that are not present in the context
-// for example, if the text is `{{ a }} {{ b }}`, nunjucks only report `a` is missing, but we need to report both `a` and `b`
-export function extractUndefinedVariableKey(text: string = '', templatingContext: Record<string, any>): string[] {
-  const regexVariable = /{{\s*([^ }]+)\s*}}/g;
-  const missingVariables: string[] = [];
-  let match;
-
-  while ((match = regexVariable.exec(text)) !== null) {
-    let variable = match[1];
-    if (variable.includes('_.')) {
-      variable = variable.split('_.')[1];
-    }
-    // Check if the variable is not present in the context
-    if (_.get(templatingContext, variable) === undefined) {
-      missingVariables.push(variable);
+export async function maskOrDecryptContextIfNecessary(context: Record<string, any> & { getPurpose: () => RenderPurpose | undefined }) {
+  // all secret variables are under vaultEnvironmentPath property in context
+  const vaultEnvironmentData = context[vaultEnvironmentPath];
+  const renderPurpose = typeof context.getPurpose === 'function' && context.getPurpose();
+  /**
+    * Decrypt secrets when renderPurpose is one of the following:
+    * - preview: render the template in variable editor to do the live preview
+    * - send: render the template when sending requests
+    * - script: render the template in pre-request or after-response script
+  */
+  const shouldDecrypt = renderPurpose === 'preview' || renderPurpose === 'send' || renderPurpose === 'script';
+  if (typeof vaultEnvironmentData === 'object') {
+    if (shouldDecrypt) {
+      const { vaultKey, vaultSalt } = await userSession.getOrCreate();
+      const isVaultEnabled = !!vaultSalt;
+      if (isVaultEnabled && vaultKey) {
+        const symmetricKey = await decryptVaultKeyFromSession(vaultKey, true) as JsonWebKey;
+        // decrypt all secert values under vaultEnvironmentPath property in context
+        Object.keys(vaultEnvironmentData).forEach(vaultContextKey => {
+          const encryptedValue = vaultEnvironmentData[vaultContextKey];
+          vaultEnvironmentData[vaultContextKey] = decryptSecretValue(encryptedValue, symmetricKey);
+        });
+      } else if (isVaultEnabled && !vaultKey) {
+        // remove all values under vaultEnvironmentPath if no vault key found
+        context[vaultEnvironmentPath] = {};
+      }
+    } else {
+      // mask all secert values under vaultEnvironmentPath property in context
+      Object.keys(vaultEnvironmentData).forEach(vaultContextKey => {
+        vaultEnvironmentData[vaultContextKey] = vaultEnvironmentMaskValue;
+      });
     }
   }
-  return missingVariables;
+  return context;
 }
 
 export function extractNunjucksTagFromCoords(
