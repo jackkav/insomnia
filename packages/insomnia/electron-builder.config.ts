@@ -1,5 +1,5 @@
 const BINARY_PREFIX = 'Insomnia.Core';
-import type {Configuration} from 'electron-builder';
+import type { Configuration } from 'electron-builder';
 // NOTE: USE_HARD_LINKS
 // https://github.com/electron-userland/electron-builder/issues/4594#issuecomment-574653870
 
@@ -59,7 +59,7 @@ const config: Configuration = {
 =======
     notarize: {
       teamId: 'FX44YY62GV',
-      
+
     },
 >>>>>>> ec318a99f (ts):packages/insomnia/electron-builder.config.ts
     asarUnpack: [
@@ -155,4 +155,4 @@ if (platform && targets) {
   const PLATFORM_MAP = { darwin: 'mac', linux: 'linux', win32: 'win' };
   config[PLATFORM_MAP[platform]].target = config[PLATFORM_MAP[platform]].target.filter(({ target }) => targets.includes(target));
 }
-module.exports = config;
+export default config;
