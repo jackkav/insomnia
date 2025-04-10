@@ -1,12 +1,9 @@
 const BINARY_PREFIX = 'Insomnia.Core';
+import type {Configuration} from 'electron-builder';
 // NOTE: USE_HARD_LINKS
 // https://github.com/electron-userland/electron-builder/issues/4594#issuecomment-574653870
 
-/**
- * @type {import('electron-builder').Configuration}
- * @see https://www.electron.build/configuration/configuration
- */
-const config = {
+const config: Configuration = {
   npmRebuild: false,
   appId: 'com.insomnia.app',
   protocols: [
@@ -36,9 +33,6 @@ const config = {
     main: 'main.min.js', // Override the main path in package.json
   },
   fileAssociations: [],
-  electronFuses: {
-    runAsNode: false,
-  },
   mac: {
     hardenedRuntime: true,
     category: 'public.app-category.developer-tools',
@@ -60,7 +54,14 @@ const config = {
       NSRequiresAquaSystemAppearance: false,
     },
     // If this step fails its possible apple has new license terms which need to be accepted by logging into https://developer.apple.com/account
+<<<<<<< HEAD:packages/insomnia/electron-builder.config.js
     notarize: true,
+=======
+    notarize: {
+      teamId: 'FX44YY62GV',
+      
+    },
+>>>>>>> ec318a99f (ts):packages/insomnia/electron-builder.config.ts
     asarUnpack: [
       'node_modules/@getinsomnia/node-libcurl',
     ],
