@@ -23,7 +23,6 @@ const config = {
       filter: ['**/*'],
     },
     './package.json',
-    '!**/node_modules',
   ],
   publish: null,
   extraResources: [
