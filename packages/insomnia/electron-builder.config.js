@@ -23,6 +23,7 @@ const config = {
       filter: ['**/*'],
     },
     './package.json',
+    '!**/node_modules',
   ],
   publish: null,
   extraResources: [
@@ -52,7 +53,6 @@ const config = {
         arch: 'universal',
       },
     ],
-    x64ArchFiles: '*',
     mergeASARs: false,
     extendInfo: {
       NSRequiresAquaSystemAppearance: false,
