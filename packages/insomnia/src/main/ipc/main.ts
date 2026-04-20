@@ -132,6 +132,7 @@ export interface RendererToMainBridgeAPI {
   installPlugin: typeof installPlugin;
   parseImport: typeof convert;
   multipartBufferToArray: (options: { bodyBuffer: Buffer; contentType: string }) => Promise<Part[]>;
+  appendFile: (options: { path: string; content: string | Buffer }) => Promise<string>;
   writeFile: (options: { path: string; content: string | Buffer }) => Promise<string>;
   writeResponseBodyToFile: (options: {
     sourcePath: string;
@@ -274,6 +275,16 @@ export function registerMainHandlers() {
   );
   ipcMainHandle('parseImport', async (_, ...args: Parameters<typeof convert>) => {
     return convert(...args);
+  });
+  ipcMainHandle('appendFile', async (_, options: { path: string; content: string | Buffer }) => {
+    try {
+      const dir = path.dirname(options.path);
+      await fs.promises.mkdir(dir, { recursive: true });
+      await fs.promises.appendFile(options.path, options.content);
+      return options.path;
+    } catch (err) {
+      throw new Error(err);
+    }
   });
   ipcMainHandle('writeFile', async (_, options: { path: string; content: string | Buffer }) => {
     try {

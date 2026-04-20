@@ -1,5 +1,3 @@
-import { appendFile } from 'node:fs/promises';
-
 import * as _ from 'es-toolkit/compat';
 
 import { initInsomniaObject, InsomniaObject } from '../../insomnia-scripting-environment/src/objects';
@@ -67,7 +65,7 @@ export const runScript = async ({
   const updatedCertificates = mergeClientCertificates(context.clientCertificates, mutatedContextObject.request);
   const updatedCookieJar = mergeCookieJar(context.cookieJar, mutatedContextObject.cookieJar);
 
-  await appendFile(context.timelinePath, scriptConsole.dumpLogs());
+  await appendScriptTimeline(context.timelinePath, scriptConsole.dumpLogs());
 
   // console.log('mutatedInsomniaObject', mutatedContextObject);
   // console.log('context', context);
@@ -106,6 +104,14 @@ export const runScript = async ({
     execution: mutatedContextObject.execution,
     parentFolders: mutatedContextObject.parentFolders,
   };
+};
+
+const appendScriptTimeline = async (path: string, content: string) => {
+  if (process.type === 'renderer') {
+    await window.main.appendFile({ path, content });
+    return;
+  }
+  (await import('node:fs')).promises.appendFile(path, content);
 };
 
 // proxiedSetTimeout has to be here as callback could be an async task

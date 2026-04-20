@@ -188,6 +188,7 @@ const main: Window['main'] = {
     ipcRenderer.invoke('installPlugin', lookupName, allowScopedPackageNames),
   curlRequest: options => ipcRenderer.invoke('curlRequest', options),
   cancelCurlRequest: options => ipcRenderer.send('cancelCurlRequest', options),
+  appendFile: options => ipcRenderer.invoke('appendFile', options),
   writeFile: options => ipcRenderer.invoke('writeFile', options),
   writeResponseBodyToFile: options => ipcRenderer.invoke('writeResponseBodyToFile', options),
   insecureReadFile: options => ipcRenderer.invoke('insecureReadFile', options),
