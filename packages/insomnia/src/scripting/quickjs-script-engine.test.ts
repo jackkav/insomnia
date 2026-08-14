@@ -397,24 +397,24 @@ describe('runScriptInQuickJs sendRequest bridge teardown', () => {
     return fetchMock;
   };
 
-  it('tears down cleanly when the script never awaits its sendRequest', async () => {
+  it('delivers the callback of a sendRequest the script never awaited', async () => {
     stubSlowFetch(120);
     const context = baseContext();
 
-    // Postman-style fire-and-forget: the script returns while the request is still in flight.
+    // The Postman-style callback form returns undefined, so this script reaches the end of its body
+    // with the request still in flight. The run drains outstanding host calls before tearing down,
+    // so the callback still fires instead of being silently dropped.
     const result = await runScriptInQuickJs({
       script: `
-        insomnia.sendRequest('https://example.com', () => {});
+        insomnia.sendRequest('https://example.com', (error, response) => {
+          insomnia.environment.set('callbackBody', response.body);
+        });
         insomnia.environment.set('finished', true);
       `,
       context,
     });
 
-    expect((result.environment.data as Record<string, unknown>).finished).toBe(true);
-
-    // The response lands after teardown; it must be a silent no-op rather than an abort or an
-    // unhandled QuickJSUseAfterFree rejection out of the settle callback.
-    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(result.environment.data).toMatchObject({ finished: true, callbackBody: 'late' });
 
     // A later run still works. Note this is NOT what detects the abort — a fresh context on the same
     // WASM module succeeds even after one, so only the assertions above are load-bearing here.
@@ -423,6 +423,26 @@ describe('runScriptInQuickJs sendRequest bridge teardown', () => {
       context: baseContext(),
     });
     expect((laterResult.environment.data as Record<string, unknown>).ranCleanly).toBe(true);
+  });
+
+  it('cancels and reports a sendRequest still outstanding when the drain deadline passes', async () => {
+    stubSlowFetch(5000);
+    const context = baseContext();
+    context.settings = { timeout: 150 } as any;
+
+    const result = await runScriptInQuickJs({
+      script: `
+        insomnia.sendRequest('https://example.com', (error) => {
+          console.log('sendRequest failed: ' + error);
+        });
+        insomnia.environment.set('finished', true);
+      `,
+      context,
+    });
+
+    expect((result.environment.data as Record<string, unknown>).finished).toBe(true);
+    // The script learns the request was cancelled rather than the response vanishing silently.
+    expect(result.logs.some(row => row.includes('did not finish before the script did'))).toBe(true);
   });
 
   it('tears down cleanly when the deadline fires while a sendRequest is in flight', async () => {
@@ -459,12 +479,15 @@ describe('runScriptInQuickJs sendRequest bridge teardown', () => {
                       JSON.stringify({ code: 200, status: 'OK', headers: [], body: 'x', responseTime: 1 }),
                     ),
                 }),
-              call++ === 0 ? 0 : 2000,
+              call++ === 0 ? 0 : 5000,
             ),
           ),
       ),
     );
     const context = baseContext();
+    // Bounds the drain phase, so the outstanding second request doesn't hold the run open for the
+    // full default script timeout.
+    context.settings = { timeout: 150 } as any;
 
     const result = await runScriptInQuickJs({
       script: `

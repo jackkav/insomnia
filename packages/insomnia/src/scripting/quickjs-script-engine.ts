@@ -22,6 +22,11 @@ import { getQuickJSModule } from '../templating/sandbox/quickjs-runtime';
  * only `code`/`status`/`headers`/`body`/`responseTime`/`json()`/`text()` (no chai assertions, no
  * `originalRequest`). Full parity with the hidden-window `Response` class is deferred.
  *
+ * Async host work is owned by a `BridgeCalls` registry rather than by the individual callbacks that
+ * start it (see below). That's what makes teardown deterministic: the VM is never disposed while a
+ * host call still holds live VM handles, and a response that arrives after the run is over can't
+ * touch a freed context.
+ *
  * Not supported (throws inside the script if called): insomnia.test()/pm.test(), collectionVariables,
  * vault, cookies, client certificates, and mutating the request.
  */
@@ -46,14 +51,9 @@ export const runScriptInQuickJs = async ({
   const environmentData: Record<string, unknown> = { ...context.environment.data };
   const variablesData: Record<string, unknown> = { ...context.transientVariables?.data };
 
-  // Every VM promise handed to the script by `installSendRequestBridge` that hasn't settled yet.
-  // Each one owns three JSValues — the promise plus its `resolve`/`reject` functions — and
-  // quickjs-emscripten only frees the two functions from inside `resolve()`/`reject()`. A VM
-  // promise still pending when the runtime is freed therefore leaks two live function objects,
-  // which trips QuickJS's `assert(list_empty(&rt->gc_obj_list))` in `JS_FreeRuntime`: a native
-  // Emscripten abort rather than a catchable error, so it takes the script worker down instead of
-  // surfacing as a script failure. `finally` below settles this set before disposing.
-  const pendingDeferreds = new Set<QuickJSDeferredPromise>();
+  const bridgeCalls = createBridgeCalls();
+  // Whether `__task` settled — gates whether teardown may pump the VM. See `abandonAll`.
+  let taskSettled = false;
 
   try {
     // Polled during synchronous execution so a tight sync loop in the script can't bypass the timeout.
@@ -63,20 +63,17 @@ export const runScriptInQuickJs = async ({
     installConsole(vm, scriptConsole);
     installKeyValueBridge(vm, '__envGet', '__envSet', environmentData);
     installKeyValueBridge(vm, '__varGet', '__varSet', variablesData);
-    installSendRequestBridge(vm, pendingDeferreds, authToken);
+    installSendRequestBridge(vm, bridgeCalls, authToken);
     setGlobalString(vm, '__requestJSON', JSON.stringify(context.request ?? {}));
 
     evalOrThrow(vm, BOOTSTRAP, '<quickjs-script-bootstrap>');
     evalOrThrow(vm, wrapUserScript(script), '<user-script>');
 
-    await driveTaskToCompletion(vm, deadline, timeoutMs);
+    await driveTaskToCompletion(vm, bridgeCalls, deadline, timeoutMs);
+    taskSettled = true;
   } finally {
-    // Ordering matters: free the resolve/reject functions of anything still in flight (a script
-    // that never awaited its sendRequest, or a run that hit the deadline mid-request) *before*
-    // the runtime, or `JS_FreeRuntime` aborts. `dispose()` is documented as idempotent, so
-    // already-settled deferreds still in the set are harmless.
-    pendingDeferreds.forEach(deferred => deferred.dispose());
-    pendingDeferreds.clear();
+    // Nothing may still own a VM handle when the runtime goes — see `abandonAll`.
+    bridgeCalls.abandonAll(vm, SEND_REQUEST_ABANDONED_MESSAGE, taskSettled);
     vm.dispose();
   }
 
@@ -188,11 +185,22 @@ const DANGEROUS_BRIDGE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const SEND_REQUEST_ENDPOINT = 'insomnia-templating-worker-database://network.sendrequestwithoutsideeffects';
 const TEMPLATING_DB_AUTH_HEADER = 'x-insomnia-templating-auth';
 
-const sendRequestViaFetch = async (requestBodyJson: string, authToken?: string): Promise<Record<string, unknown>> => {
+const SEND_REQUEST_ABANDONED_MESSAGE =
+  'insomnia.sendRequest() did not finish before the script did — the request was cancelled.';
+
+/** Settle/pump rounds allowed at teardown; the last one only settles. See `abandonAll`. */
+const MAX_ABANDON_PASSES = 3;
+
+const sendRequestViaFetch = async (
+  requestBodyJson: string,
+  signal: AbortSignal,
+  authToken?: string,
+): Promise<Record<string, unknown>> => {
   const resp = await fetch(SEND_REQUEST_ENDPOINT, {
     method: 'post',
     headers: authToken ? { [TEMPLATING_DB_AUTH_HEADER]: authToken } : undefined,
     body: requestBodyJson,
+    signal,
   });
   const parsed = JSON.parse(await resp.text());
   if (!resp.ok) {
@@ -201,68 +209,143 @@ const sendRequestViaFetch = async (requestBodyJson: string, authToken?: string):
   return parsed;
 };
 
+/** One in-flight `insomnia.sendRequest()`: the VM promise the script is holding, plus its fetch. */
+interface BridgeCall {
+  deferred: QuickJSDeferredPromise;
+  controller: AbortController;
+}
+
+type BridgeCalls = ReturnType<typeof createBridgeCalls>;
+
+/**
+ * Owns every `insomnia.sendRequest()` still waiting on the host.
+ *
+ * This registry exists because of how `vm.newPromise()` allocates: each deferred holds THREE
+ * JSValues — the promise plus its `resolve`/`reject` functions — and quickjs-emscripten frees the
+ * two functions only from inside `resolve()`/`reject()`. A deferred that is never settled therefore
+ * keeps two live function objects in the runtime, and `JS_FreeRuntime` aborts the whole WASM module
+ * on `assert(list_empty(&rt->gc_obj_list))` — a native Emscripten abort rather than a catchable
+ * error, so it takes the script worker down instead of surfacing as a script failure.
+ *
+ * Rather than leave that invariant to each callback, the run owns the set: `driveTaskToCompletion`
+ * drains it before finishing, and `abandonAll` guarantees it is empty before `vm.dispose()`.
+ */
+const createBridgeCalls = () => {
+  const open = new Set<BridgeCall>();
+
+  return {
+    get size(): number {
+      return open.size;
+    },
+
+    add(call: BridgeCall): void {
+      open.add(call);
+    },
+
+    /** Called once a call has settled the VM promise itself; nothing left to clean up. */
+    close(call: BridgeCall): void {
+      open.delete(call);
+    },
+
+    /**
+     * Cancel the host work for every call still open and settle its VM promise, so the run can
+     * dispose the context safely. Rejecting is preferred over disposing the deferred outright: it
+     * is the library's documented path, it frees the resolvers the same way, and a script that
+     * attached a `.catch` (or passed a callback) gets a real error instead of a promise that
+     * silently never settles. `dispose()` still runs afterwards as a backstop — it is idempotent,
+     * and it is the thing that actually has to have happened before the runtime goes.
+     *
+     * `notifyScript` controls whether the VM job queue is pumped so the script's own `.catch` /
+     * callback actually runs. It is only safe once `__task` has settled: pumping while the task is
+     * still pending lets the rejection resume the script and settle the task, at which point
+     * `vm.resolvePromise`'s reject callback `dup()`s the error into a host promise that
+     * `driveTaskToCompletion` has already stopped listening to — an undisposed handle, i.e. the same
+     * abort by another route. On the timeout/error path the deferreds are therefore freed silently.
+     *
+     * Passes alternate settle/pump because a script's handler can start another request; the last
+     * pass never pumps, so nothing can be left unsettled behind us.
+     */
+    abandonAll(vm: QuickJSContext, reason: string, notifyScript: boolean): void {
+      if (notifyScript && open.size > 0 && vm.alive) {
+        // Teardown can run because the deadline passed, and an armed interrupt handler aborts the
+        // pump below immediately — so the script would never see the cancellation. Nothing after
+        // this point runs unbounded user code: the passes are capped.
+        vm.runtime.removeInterruptHandler();
+      }
+      for (let pass = 0; pass < MAX_ABANDON_PASSES && open.size > 0; pass++) {
+        const batch = [...open];
+        open.clear();
+        batch.forEach(({ deferred, controller }) => {
+          controller.abort();
+          if (vm.alive && deferred.alive) {
+            const errorHandle = vm.newError(reason);
+            deferred.reject(errorHandle);
+            errorHandle.dispose();
+          }
+          deferred.dispose();
+        });
+        if (notifyScript && vm.alive && pass < MAX_ABANDON_PASSES - 1) {
+          vm.runtime.executePendingJobs().dispose();
+        }
+      }
+      open.clear();
+    },
+  };
+};
+
 /** Registers the async `__sendRequest(bodyJson)` bridge backing `insomnia.sendRequest()` in BOOTSTRAP. */
-const installSendRequestBridge = (
-  vm: QuickJSContext,
-  pendingDeferreds: Set<QuickJSDeferredPromise>,
-  authToken?: string,
-): void => {
+const installSendRequestBridge = (vm: QuickJSContext, calls: BridgeCalls, authToken?: string): void => {
   const fn = vm.newFunction('__sendRequest', bodyHandle => {
     const bodyJson = vm.getString(bodyHandle);
-    const deferred = vm.newPromise();
-    // Registered so the run's `finally` can free this deferred's resolve/reject functions if the
-    // fetch is still outstanding when the VM is torn down — see `pendingDeferreds`' comment.
-    pendingDeferreds.add(deferred);
+    const call: BridgeCall = { deferred: vm.newPromise(), controller: new AbortController() };
+    calls.add(call);
+
     // `Promise.resolve().then(...)` defers the real fetch() call by one microtask tick so it never
     // runs while still nested inside this C-to-JS callback frame — matching plugin-tag-sandbox.ts's
     // installHostBridge, the proven-working equivalent for the template-tag sandbox.
     Promise.resolve()
-      .then(() => sendRequestViaFetch(bodyJson, authToken))
+      .then(() => sendRequestViaFetch(bodyJson, call.controller.signal, authToken))
       .then(
-        value => settle(vm, deferred, pendingDeferreds, JSON.stringify({ ok: true, value })),
+        value => settleCall(vm, calls, call, JSON.stringify({ ok: true, value })),
         err =>
-          settle(
+          settleCall(
             vm,
-            deferred,
-            pendingDeferreds,
+            calls,
+            call,
             JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
           ),
       );
+
     // The settled VM promise schedules a job; pump it so the awaiting script resumes.
-    deferred.settled.then(() => {
+    call.deferred.settled.then(() => {
       if (vm.alive) {
         // executePendingJobs() returns a DisposableResult — on failure its `.error` is a live
         // QuickJSHandle that leaks if the result is discarded rather than disposed.
         vm.runtime.executePendingJobs().dispose();
       }
     });
-    return deferred.handle;
+
+    return call.deferred.handle;
   });
   setGlobal(vm, '__sendRequest', fn);
 };
 
 /**
- * Resolve a bridge deferred with a JSON payload, if the VM is still around to receive it.
+ * Hand a host response back to the script, unless the run already abandoned this call.
  *
- * A `fetch()` can land after the run has finished (the script never awaited it, or the deadline
- * fired first), by which point the VM is gone: `vm.newString` on a disposed context throws
+ * `abandonAll` settles and drops anything outstanding, so by the time a cancelled fetch rejects
+ * here the deferred is dead and there is nothing to do. Touching a disposed context would throw
  * `QuickJSUseAfterFree` synchronously inside this `.then`, i.e. an unhandled rejection in the
- * worker. `deferred.alive` covers the narrower case of a deferred already force-disposed by the
- * run's `finally` while the context itself is somehow still up.
+ * worker, so both guards matter.
  */
-const settle = (
-  vm: QuickJSContext,
-  deferred: QuickJSDeferredPromise,
-  pendingDeferreds: Set<QuickJSDeferredPromise>,
-  value: string,
-): void => {
-  if (!vm.alive || !deferred.alive) {
+const settleCall = (vm: QuickJSContext, calls: BridgeCalls, call: BridgeCall, value: string): void => {
+  if (!vm.alive || !call.deferred.alive) {
     return;
   }
   const handle = vm.newString(value);
-  deferred.resolve(handle);
+  call.deferred.resolve(handle);
   handle.dispose();
-  pendingDeferreds.delete(deferred);
+  calls.close(call);
 };
 
 /** Registers `<getName>(key)`/`<setName>(key, jsonValue)` host functions backed by a plain object. */
@@ -319,7 +402,12 @@ const evalOrThrow = (vm: QuickJSContext, code: string, filename: string): void =
 };
 
 /** Drives `globalThis.__task` (a VM promise wrapping the user script) to completion. */
-const driveTaskToCompletion = async (vm: QuickJSContext, deadline: number, timeoutMs: number): Promise<void> => {
+const driveTaskToCompletion = async (
+  vm: QuickJSContext,
+  calls: BridgeCalls,
+  deadline: number,
+  timeoutMs: number,
+): Promise<void> => {
   const taskHandle = vm.getProp(vm.global, '__task');
   const resultPromise = vm.resolvePromise(taskHandle);
   taskHandle.dispose();
@@ -349,6 +437,16 @@ const driveTaskToCompletion = async (vm: QuickJSContext, deadline: number, timeo
   }
   if ('value' in settled) {
     settled.value.dispose();
+  }
+
+  // The script can finish with requests still in flight — the Postman-style
+  // `insomnia.sendRequest(url, callback)` form returns undefined, so a script using it reaches the
+  // end of its body immediately. Returning here would tear the VM down before those responses
+  // land, silently dropping every callback. Keep pumping until they arrive or the deadline passes;
+  // whatever is left over is cancelled and rejected by `abandonAll`.
+  while (calls.size > 0 && Date.now() <= deadline) {
+    vm.runtime.executePendingJobs().dispose();
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 };
 
